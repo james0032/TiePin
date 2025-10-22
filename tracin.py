@@ -66,7 +66,11 @@ class TracInAnalyzer:
         Returns:
             Dictionary mapping parameter names to gradient tensors
         """
-        self.model.train()
+        # Keep model in eval mode to avoid BatchNorm issues with batch_size=1
+        # But enable gradient computation for parameters
+        self.model.eval()
+        for param in self.model.parameters():
+            param.requires_grad = True
         self.model.zero_grad()
 
         # Forward pass
