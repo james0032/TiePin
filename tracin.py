@@ -143,13 +143,67 @@ class TracInAnalyzer:
 
         return influence
 
+    def compute_batch_individual_gradients(
+        self,
+        triples_batch: torch.Tensor
+    ) -> List[Dict[str, torch.Tensor]]:
+        """Compute individual gradients for each triple in a batch.
+
+        Uses per-sample gradient computation by iterating through samples
+        but keeping them on GPU for faster processing.
+
+        Args:
+            triples_batch: Tensor of shape (batch_size, 3) with [head, relation, tail]
+
+        Returns:
+            List of gradient dictionaries, one per triple in the batch
+        """
+        self.model.eval()
+        for param in self.model.parameters():
+            param.requires_grad = True
+
+        batch_size = triples_batch.shape[0]
+        batch_gradients = []
+
+        # Move entire batch to device once
+        triples_batch = triples_batch.to(self.device)
+
+        # Process each sample to get individual gradients
+        for i in range(batch_size):
+            self.model.zero_grad()
+
+            h, r, t = triples_batch[i]
+            hr_batch = torch.LongTensor([[int(h), int(r)]]).to(self.device)
+            scores = self.model.score_t(hr_batch)
+            score = scores[0, int(t)]
+
+            # Compute loss for this sample
+            if self.loss_fn == 'bce':
+                target = torch.tensor([1.0], dtype=torch.float32, device=self.device)
+                loss = F.binary_cross_entropy_with_logits(score.unsqueeze(0), target)
+            else:
+                raise ValueError(f"Unknown loss function: {self.loss_fn}")
+
+            # Backward pass
+            loss.backward()
+
+            # Collect gradients for this sample
+            sample_grads = {}
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    sample_grads[name] = param.grad.clone().detach()
+
+            batch_gradients.append(sample_grads)
+
+        return batch_gradients
+
     def compute_influences_for_test_triple(
         self,
         test_triple: Tuple[int, int, int],
         training_triples: CoreTriplesFactory,
         learning_rate: float = 1e-3,
         top_k: Optional[int] = None,
-        batch_size: int = 1
+        batch_size: int = 256
     ) -> List[Dict[str, any]]:
         """Compute influences of all training triples on a single test triple.
 
@@ -158,44 +212,60 @@ class TracInAnalyzer:
             training_triples: Training triples factory
             learning_rate: Learning rate used during training
             top_k: If specified, return only top-k most influential triples
-            batch_size: Batch size for processing (currently must be 1)
+            batch_size: Batch size for GPU processing (larger = faster, but more memory)
 
         Returns:
             List of dictionaries with training triple info and influence score
         """
         logger.info(f"Computing influences for test triple: {test_triple}")
-
-        influences = []
+        logger.info(f"Using batch size: {batch_size} on device: {self.device}")
 
         # Compute gradient for test triple once
         test_h, test_r, test_t = test_triple
         grad_test = self.compute_gradient(test_h, test_r, test_t, label=1.0)
 
-        # Iterate through training triples
-        for h, r, t in tqdm(training_triples.mapped_triples, desc="Computing influences"):
-            train_triple = (int(h), int(r), int(t))
+        # Flatten test gradients once for efficient dot products
+        grad_test_flat = {}
+        for name in grad_test:
+            grad_test_flat[name] = grad_test[name].flatten()
 
-            # Compute gradient for training triple
-            grad_train = self.compute_gradient(*train_triple, label=1.0)
+        influences = []
+        train_triples_array = training_triples.mapped_triples
+        if not isinstance(train_triples_array, torch.Tensor):
+            train_triples_array = torch.from_numpy(train_triples_array.numpy())
 
-            # Compute dot product
-            influence = 0.0
-            for name in grad_train:
-                if name in grad_test:
-                    grad_train_flat = grad_train[name].flatten()
-                    grad_test_flat = grad_test[name].flatten()
-                    influence += torch.dot(grad_train_flat, grad_test_flat).item()
+        num_train = len(train_triples_array)
 
-            influence *= learning_rate
+        # Process training triples in batches
+        for batch_start in tqdm(range(0, num_train, batch_size), desc="Computing influences"):
+            batch_end = min(batch_start + batch_size, num_train)
+            batch_triples = train_triples_array[batch_start:batch_end]
 
-            influences.append({
-                'train_head': train_triple[0],
-                'train_relation': train_triple[1],
-                'train_tail': train_triple[2],
-                'influence': influence
-            })
+            # Compute gradients for all triples in the batch
+            batch_gradients = self.compute_batch_individual_gradients(batch_triples)
 
-        # Sort by influence (descending)
+            # Compute influence for each training triple in the batch
+            for i, grad_train in enumerate(batch_gradients):
+                triple_idx = batch_start + i
+                h, r, t = train_triples_array[triple_idx]
+
+                # Compute dot product with test gradient
+                influence = 0.0
+                for name in grad_train:
+                    if name in grad_test_flat:
+                        grad_train_flat = grad_train[name].flatten()
+                        influence += torch.dot(grad_train_flat, grad_test_flat[name]).item()
+
+                influence *= learning_rate
+
+                influences.append({
+                    'train_head': int(h),
+                    'train_relation': int(r),
+                    'train_tail': int(t),
+                    'influence': influence
+                })
+
+        # Sort by influence (descending by absolute value)
         influences.sort(key=lambda x: abs(x['influence']), reverse=True)
 
         # Return top-k if specified
@@ -211,7 +281,8 @@ class TracInAnalyzer:
         learning_rate: float = 1e-3,
         top_k: int = 10,
         max_test_triples: Optional[int] = None,
-        output_path: Optional[str] = None
+        output_path: Optional[str] = None,
+        batch_size: int = 256
     ) -> Dict[str, any]:
         """Analyze influence of training data on test predictions.
 
@@ -222,6 +293,7 @@ class TracInAnalyzer:
             top_k: Number of top influential training triples to return per test triple
             max_test_triples: Maximum number of test triples to analyze (None for all)
             output_path: Optional path to save results
+            batch_size: Batch size for processing training triples
 
         Returns:
             Dictionary with influence analysis results
@@ -239,7 +311,8 @@ class TracInAnalyzer:
                 test_triple=test_triple,
                 training_triples=training_triples,
                 learning_rate=learning_rate,
-                top_k=top_k
+                top_k=top_k,
+                batch_size=batch_size
             )
 
             results.append({

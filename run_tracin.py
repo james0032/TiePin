@@ -40,7 +40,8 @@ def run_tracin_analysis(
     embedding_dim: int = 200,
     output_channels: int = 32,
     device: str = 'cpu',
-    output_per_triple: bool = False
+    output_per_triple: bool = False,
+    batch_size: int = 256
 ):
     """Run TracIn analysis.
 
@@ -60,6 +61,7 @@ def run_tracin_analysis(
         output_channels: Model output channels
         device: Device to run on
         output_per_triple: If True, save separate file for each test triple
+        batch_size: Batch size for processing training triples
     """
     logger.info("Loading model and data...")
 
@@ -234,7 +236,8 @@ def run_tracin_analysis(
                     test_triple=test_triple,
                     training_triples=train_triples,
                     learning_rate=learning_rate,
-                    top_k=top_k
+                    top_k=top_k,
+                    batch_size=batch_size
                 )
 
                 # Compute self-influence for the test triple
@@ -286,7 +289,8 @@ def run_tracin_analysis(
                 learning_rate=learning_rate,
                 top_k=top_k,
                 max_test_triples=max_test_triples,
-                output_path=output_path
+                output_path=output_path,
+                batch_size=batch_size
             )
 
             logger.info(f"\nAnalyzed {analysis['num_test_triples']} test triples")
@@ -316,7 +320,8 @@ def run_tracin_analysis(
                 test_triple=test_triple,
                 training_triples=train_triples,
                 learning_rate=learning_rate,
-                top_k=top_k
+                top_k=top_k,
+                batch_size=batch_size
             )
 
             # Compute self-influence for the test triple
@@ -441,6 +446,10 @@ def parse_args():
         '--output-per-triple', action='store_true',
         help='Save separate JSON file for each test triple (test mode only)'
     )
+    parser.add_argument(
+        '--batch-size', type=int, default=256,
+        help='Batch size for processing training triples (larger = faster on GPU)'
+    )
 
     return parser.parse_args()
 
@@ -473,7 +482,8 @@ def main():
         embedding_dim=args.embedding_dim,
         output_channels=args.output_channels,
         device=args.device,
-        output_per_triple=args.output_per_triple
+        output_per_triple=args.output_per_triple,
+        batch_size=args.batch_size
     )
 
     logger.info("\nTracIn analysis completed!")
