@@ -41,7 +41,10 @@ def run_tracin_analysis(
     output_channels: int = 32,
     device: str = 'cpu',
     output_per_triple: bool = False,
-    batch_size: int = 256
+    batch_size: int = 256,
+    use_last_layers_only: bool = False,
+    last_layer_names: list = None,
+    num_last_layers: int = 2
 ):
     """Run TracIn analysis.
 
@@ -62,6 +65,9 @@ def run_tracin_analysis(
         device: Device to run on
         output_per_triple: If True, save separate file for each test triple
         batch_size: Batch size for processing training triples
+        use_last_layers_only: If True, only compute gradients for last layers (MUCH faster!)
+        last_layer_names: Specific layer names to track (optional, auto-detects if None)
+        num_last_layers: Number of last layers to track when auto-detecting (default: 2)
     """
     logger.info("Loading model and data...")
 
@@ -158,7 +164,30 @@ def run_tracin_analysis(
     logger.info(f"Model loaded successfully")
 
     # Create analyzer
-    analyzer = TracInAnalyzer(model=model, device=device)
+    analyzer = TracInAnalyzer(
+        model=model,
+        device=device,
+        use_last_layers_only=use_last_layers_only,
+        last_layer_names=last_layer_names,
+        num_last_layers=num_last_layers
+    )
+
+    # Log which parameters are being tracked
+    if use_last_layers_only:
+        logger.info(f"Using LAST {num_last_layers} LAYER(S) mode for faster computation")
+        if analyzer.tracked_params:
+            logger.info(f"Tracking {len(analyzer.tracked_params)} parameter(s): {analyzer.tracked_params}")
+            # Calculate and log reduction
+            tracked_size = sum(
+                param.numel() for name, param in model.named_parameters()
+                if name in analyzer.tracked_params
+            )
+            total_size = sum(p.numel() for p in model.parameters())
+            reduction = 100 * (1 - tracked_size / total_size)
+            logger.info(f"Parameter reduction: {reduction:.1f}% ({tracked_size:,} / {total_size:,} params)")
+    else:
+        total_params = len(list(model.named_parameters()))
+        logger.info(f"Using ALL PARAMETERS mode - tracking {total_params} parameters")
 
     # Helper function to add labels to a triple
     def add_labels_to_triple(triple_dict, prefix=''):
@@ -450,6 +479,18 @@ def parse_args():
         '--batch-size', type=int, default=256,
         help='Batch size for processing training triples (larger = faster on GPU)'
     )
+    parser.add_argument(
+        '--use-last-layers-only', action='store_true',
+        help='Only compute gradients for last layers (MUCH faster, following original TracIn paper)'
+    )
+    parser.add_argument(
+        '--num-last-layers', type=int, default=2,
+        help='Number of last layers to track (default: 2). Options: 1 (fastest), 2-3 (recommended), 5+ (slower)'
+    )
+    parser.add_argument(
+        '--last-layer-names', type=str, nargs='+',
+        help='Specific layer names to track (optional, auto-detects if not provided)'
+    )
 
     return parser.parse_args()
 
@@ -483,7 +524,10 @@ def main():
         output_channels=args.output_channels,
         device=args.device,
         output_per_triple=args.output_per_triple,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        use_last_layers_only=args.use_last_layers_only,
+        last_layer_names=args.last_layer_names,
+        num_last_layers=args.num_last_layers
     )
 
     logger.info("\nTracIn analysis completed!")

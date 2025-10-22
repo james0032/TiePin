@@ -34,7 +34,10 @@ class TracInAnalyzer:
         self,
         model: Model,
         loss_fn: str = 'bce',
-        device: Optional[str] = None
+        device: Optional[str] = None,
+        use_last_layers_only: bool = False,
+        last_layer_names: Optional[List[str]] = None,
+        num_last_layers: int = 2
     ):
         """Initialize TracIn analyzer.
 
@@ -42,11 +45,105 @@ class TracInAnalyzer:
             model: Trained PyKEEN model
             loss_fn: Loss function to use ('bce' for binary cross-entropy)
             device: Device to run computation on
+            use_last_layers_only: If True, only compute gradients for last layers (faster)
+            last_layer_names: List of parameter names to track. If None and use_last_layers_only=True,
+                             will auto-detect based on num_last_layers. Common patterns:
+                             - For ConvE: ['interaction.linear.weight', 'interaction.linear.bias']
+            num_last_layers: Number of last layers to track when auto-detecting (default: 2)
+                            Options: 1 (fastest, least accurate), 2-3 (recommended), 5+ (slower)
         """
         self.model = model
         self.loss_fn = loss_fn
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.model.to(self.device)
+        self.use_last_layers_only = use_last_layers_only
+        self.num_last_layers = num_last_layers
+
+        # Auto-detect or set last layers to track
+        if use_last_layers_only:
+            if last_layer_names is None:
+                # Auto-detect last N layers
+                self.tracked_params = self._auto_detect_last_layers(num_layers=num_last_layers)
+                logger.info(f"Auto-detected last {num_last_layers} layer(s): {self.tracked_params}")
+            else:
+                self.tracked_params = set(last_layer_names)
+                logger.info(f"Using specified {len(last_layer_names)} layer(s): {self.tracked_params}")
+        else:
+            # Track all parameters
+            self.tracked_params = None
+            logger.info("Tracking gradients for ALL model parameters")
+
+    def _auto_detect_last_layers(self, num_layers: int = 2) -> set:
+        """Auto-detect last N layers of the model.
+
+        For ConvE, this typically includes (in order from last to first):
+        1. interaction.linear.bias (final scoring layer bias)
+        2. interaction.linear.weight (final scoring layer weight)
+        3. interaction.bn2.* (final batch norm, if num_layers >= 3)
+        4. Earlier conv/batch norm layers (if num_layers > 3)
+
+        Args:
+            num_layers: Number of last layers to track (default: 2)
+
+        Returns:
+            Set of parameter names to track
+        """
+        all_params = list(self.model.named_parameters())
+
+        if len(all_params) == 0:
+            logger.warning("Model has no parameters!")
+            return None
+
+        # Strategy 1: Look for semantic final layer patterns (preferred)
+        last_layers = set()
+
+        # Look for final linear/fc layer (most common final layer)
+        linear_params = []
+        for name, _ in all_params:
+            if any(pattern in name for pattern in ['linear.weight', 'linear.bias', 'fc.weight', 'fc.bias']):
+                # Check if it's NOT in an embedding layer (we want final scoring layer)
+                if 'embedding' not in name:
+                    linear_params.append(name)
+
+        # If we found final linear layers, use them as a base
+        if linear_params:
+            last_layers.update(linear_params)
+
+            # If user wants more layers, add preceding layers
+            if num_layers > len(linear_params):
+                # Find the index of the first linear layer in all_params
+                first_linear_idx = None
+                for i, (name, _) in enumerate(all_params):
+                    if name in linear_params:
+                        first_linear_idx = i
+                        break
+
+                if first_linear_idx is not None:
+                    # Add layers before the linear layer
+                    extra_layers_needed = num_layers - len(linear_params)
+                    start_idx = max(0, first_linear_idx - extra_layers_needed)
+
+                    for i in range(start_idx, first_linear_idx):
+                        name, _ = all_params[i]
+                        # Skip embedding layers
+                        if 'embedding' not in name:
+                            last_layers.add(name)
+
+            return last_layers
+
+        # Strategy 2: Just take the last N parameters (fallback)
+        logger.info(f"Could not find semantic final layers, using last {num_layers} parameter(s)")
+
+        num_to_take = min(num_layers, len(all_params))
+        for name, _ in all_params[-num_to_take:]:
+            last_layers.add(name)
+
+        if last_layers:
+            return last_layers
+
+        # Final fallback: track all (if model is very small)
+        logger.warning("Could not auto-detect last layers, will track all parameters")
+        return None
 
     def compute_gradient(
         self,
@@ -91,11 +188,13 @@ class TracInAnalyzer:
         # Backward pass
         loss.backward()
 
-        # Collect gradients
+        # Collect gradients (only for tracked parameters if specified)
         gradients = {}
         for name, param in self.model.named_parameters():
             if param.grad is not None:
-                gradients[name] = param.grad.clone()
+                # Only include if we're tracking all params OR this param is in tracked set
+                if self.tracked_params is None or name in self.tracked_params:
+                    gradients[name] = param.grad.clone()
 
         return gradients
 
@@ -187,11 +286,13 @@ class TracInAnalyzer:
             # Backward pass
             loss.backward()
 
-            # Collect gradients for this sample
+            # Collect gradients for this sample (only tracked parameters)
             sample_grads = {}
             for name, param in self.model.named_parameters():
                 if param.grad is not None:
-                    sample_grads[name] = param.grad.clone().detach()
+                    # Only include if we're tracking all params OR this param is in tracked set
+                    if self.tracked_params is None or name in self.tracked_params:
+                        sample_grads[name] = param.grad.clone().detach()
 
             batch_gradients.append(sample_grads)
 
@@ -400,7 +501,10 @@ def compute_tracin_influence(
     training_triples: CoreTriplesFactory,
     learning_rate: float = 1e-3,
     top_k: int = 10,
-    device: Optional[str] = None
+    device: Optional[str] = None,
+    use_last_layers_only: bool = False,
+    last_layer_names: Optional[List[str]] = None,
+    num_last_layers: int = 2
 ) -> List[Dict[str, any]]:
     """Convenience function to compute TracIn influences.
 
@@ -411,11 +515,20 @@ def compute_tracin_influence(
         learning_rate: Learning rate used during training
         top_k: Number of top influential training triples to return
         device: Device to run computation on
+        use_last_layers_only: If True, only use last layer gradients (much faster)
+        last_layer_names: Specific layer names to track (optional)
+        num_last_layers: Number of last layers to track (default: 2)
 
     Returns:
         List of dictionaries with training triple info and influence score
     """
-    analyzer = TracInAnalyzer(model=model, device=device)
+    analyzer = TracInAnalyzer(
+        model=model,
+        device=device,
+        use_last_layers_only=use_last_layers_only,
+        last_layer_names=last_layer_names,
+        num_last_layers=num_last_layers
+    )
     return analyzer.compute_influences_for_test_triple(
         test_triple=test_triple,
         training_triples=training_triples,
