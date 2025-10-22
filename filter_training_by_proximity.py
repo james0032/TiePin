@@ -213,6 +213,85 @@ class ProximityFilter:
 
         return filtered_triples
 
+    def filter_for_single_test_triple(
+        self,
+        test_triple: Tuple[int, int, int],
+        n_hops: int = 2,
+        min_degree: int = 2,
+        preserve_test_entity_edges: bool = True
+    ) -> np.ndarray:
+        """Filter training triples for a SINGLE test triple.
+
+        This is optimized for the common TracIn use case where you analyze
+        one test triple at a time.
+
+        Args:
+            test_triple: Single test triple (head, relation, tail)
+            n_hops: Number of hops from test entities
+            min_degree: Minimum degree threshold
+            preserve_test_entity_edges: If True, always keep edges with test entities
+
+        Returns:
+            Filtered training triples array
+
+        Example:
+            >>> filter_obj = ProximityFilter(training_triples)
+            >>> test_triple = (drug_id, treats_id, disease_id)
+            >>> filtered = filter_obj.filter_for_single_test_triple(
+            ...     test_triple=test_triple,
+            ...     n_hops=2,
+            ...     min_degree=2
+            ... )
+        """
+        # Extract test entities
+        test_h, test_r, test_t = test_triple
+        test_entities = {int(test_h), int(test_t)}
+
+        logger.info(f"Filtering for test triple: ({test_h}, {test_r}, {test_t})")
+        logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}")
+
+        # Get n-hop neighborhood
+        n_hop_entities = self.get_n_hop_neighbors(test_entities, n_hops)
+        n_hop_edges = self.get_n_hop_edges(test_entities, n_hops)
+
+        logger.info(f"Found {len(n_hop_entities)} entities, {len(n_hop_edges)} edges in {n_hops}-hop neighborhood")
+
+        # Compute degrees within n-hop subgraph
+        subgraph_degree = defaultdict(int)
+        for edge_idx in n_hop_edges:
+            h, r, t = self.training_triples[edge_idx]
+            subgraph_degree[int(h)] += 1
+            subgraph_degree[int(t)] += 1
+
+        # Filter by degree
+        filtered_indices = []
+
+        for edge_idx in n_hop_edges:
+            h, r, t = self.training_triples[edge_idx]
+            h, r, t = int(h), int(r), int(t)
+
+            # Check if this edge should be preserved
+            should_keep = False
+
+            # Rule 1: If either endpoint is a test entity, always keep
+            if preserve_test_entity_edges and (h in test_entities or t in test_entities):
+                should_keep = True
+
+            # Rule 2: If either endpoint has degree >= min_degree, keep
+            elif subgraph_degree[h] >= min_degree or subgraph_degree[t] >= min_degree:
+                should_keep = True
+
+            if should_keep:
+                filtered_indices.append(edge_idx)
+
+        filtered_triples = self.training_triples[filtered_indices]
+
+        reduction_pct = (1 - len(filtered_triples) / len(self.training_triples)) * 100
+        logger.info(f"Filtered: {len(self.training_triples)} → {len(filtered_triples)} "
+                   f"({reduction_pct:.1f}% reduction)")
+
+        return filtered_triples
+
     def get_statistics(self, filtered_triples: np.ndarray) -> Dict:
         """Get statistics about filtered triples.
 
