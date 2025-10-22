@@ -10,6 +10,7 @@ Reference: Pruthi et al. "Estimating Training Data Influence by Tracing Gradient
 
 import json
 import logging
+import csv
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -493,6 +494,112 @@ class TracInAnalyzer:
             logger.info(f"Saved self-influence analysis to {output_path}")
 
         return influences
+
+    def _extract_predicate_from_json(self, relation_str: str) -> str:
+        """Extract predicate value from JSON-formatted relation string.
+
+        Args:
+            relation_str: Either a JSON string like '{"predicate": "biolink:affects", ...}'
+                         or a simple string like 'predicate:27'
+
+        Returns:
+            Extracted predicate value (e.g., 'biolink:affects') or original string if not JSON
+        """
+        try:
+            # Try to parse as JSON
+            relation_obj = json.loads(relation_str)
+            # Extract the predicate field
+            if isinstance(relation_obj, dict) and 'predicate' in relation_obj:
+                return relation_obj['predicate']
+        except (json.JSONDecodeError, TypeError):
+            # Not JSON, return as-is
+            pass
+        return relation_str
+
+    def save_influences_to_csv(
+        self,
+        test_triple: Tuple[int, int, int],
+        influences: List[Dict],
+        output_path: str,
+        id_to_entity: Dict[int, str],
+        id_to_relation: Dict[int, str],
+        entity_labels: Optional[Dict[int, str]] = None,
+        relation_labels: Optional[Dict[int, str]] = None
+    ):
+        """Save TracIn influences to CSV with IDs and labels.
+
+        Args:
+            test_triple: Test triple (head, relation, tail) as indices
+            influences: List of influence dictionaries from compute_influences_for_test_triple
+            output_path: Path to save CSV file
+            id_to_entity: Mapping from entity index to entity CURIE
+            id_to_relation: Mapping from relation index to relation CURIE (may contain JSON strings)
+            entity_labels: Optional mapping from entity index to human-readable name
+            relation_labels: Optional mapping from relation index to human-readable name
+        """
+        test_h, test_r, test_t = test_triple
+
+        # Create output directory if needed
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+
+            # Write header - exactly as requested
+            writer.writerow([
+                'TestHead', 'TestHead_label',
+                'TestRel', 'TestRel_label',
+                'TestTail', 'TestTail_label',
+                'TrainHead', 'TrainHead_label',
+                'TrainRel', 'TrainRel_label',
+                'TrainTail', 'TrainTail_label',
+                'TracInScore'
+            ])
+
+            # Get test triple IDs
+            test_h_id = id_to_entity.get(test_h, f'UNKNOWN_{test_h}')
+            test_r_id = id_to_relation.get(test_r, f'UNKNOWN_{test_r}')
+            test_t_id = id_to_entity.get(test_t, f'UNKNOWN_{test_t}')
+
+            # Get test triple labels (extract predicate from JSON for relations)
+            test_h_label = entity_labels.get(test_h, test_h_id) if entity_labels else test_h_id
+            if relation_labels and test_r in relation_labels:
+                test_r_label = self._extract_predicate_from_json(relation_labels[test_r])
+            else:
+                test_r_label = self._extract_predicate_from_json(test_r_id)
+            test_t_label = entity_labels.get(test_t, test_t_id) if entity_labels else test_t_id
+
+            # Write each influence
+            for inf in influences:
+                train_h = inf['train_head']
+                train_r = inf['train_relation']
+                train_t = inf['train_tail']
+                score = inf['influence']
+
+                # Get training triple IDs
+                train_h_id = id_to_entity.get(train_h, f'UNKNOWN_{train_h}')
+                train_r_id = id_to_relation.get(train_r, f'UNKNOWN_{train_r}')
+                train_t_id = id_to_entity.get(train_t, f'UNKNOWN_{train_t}')
+
+                # Get training triple labels (extract predicate from JSON for relations)
+                train_h_label = entity_labels.get(train_h, train_h_id) if entity_labels else train_h_id
+                if relation_labels and train_r in relation_labels:
+                    train_r_label = self._extract_predicate_from_json(relation_labels[train_r])
+                else:
+                    train_r_label = self._extract_predicate_from_json(train_r_id)
+                train_t_label = entity_labels.get(train_t, train_t_id) if entity_labels else train_t_id
+
+                writer.writerow([
+                    test_h_id, test_h_label,
+                    test_r_id, test_r_label,
+                    test_t_id, test_t_label,
+                    train_h_id, train_h_label,
+                    train_r_id, train_r_label,
+                    train_t_id, train_t_label,
+                    score
+                ])
+
+        logger.info(f"Saved {len(influences)} influences to CSV: {output_path}")
 
 
 def compute_tracin_influence(

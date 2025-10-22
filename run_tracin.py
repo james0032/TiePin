@@ -526,8 +526,7 @@ def main():
         output_per_triple=args.output_per_triple,
         batch_size=args.batch_size,
         use_last_layers_only=args.use_last_layers_only,
-        last_layer_names=args.last_layer_names,
-        num_last_layers=args.num_last_layers
+        last_layer_names=args.last_layer_names
     )
 
     logger.info("\nTracIn analysis completed!")
