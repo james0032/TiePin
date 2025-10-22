@@ -11,6 +11,9 @@ Much faster and more memory-efficient than custom implementation.
 
 import logging
 from typing import Dict, List, Set, Tuple, Optional
+from pathlib import Path
+import pickle
+import hashlib
 import numpy as np
 import torch
 from torch_geometric.data import Data
@@ -24,20 +27,34 @@ class ProximityFilterPyG:
 
     This implementation uses PyG's optimized graph operations for
     fast neighborhood extraction and filtering.
+
+    Supports caching: Save/load the graph object to avoid rebuilding.
     """
 
-    def __init__(self, training_triples: np.ndarray):
+    def __init__(self, training_triples: np.ndarray, cache_path: Optional[str] = None):
         """Initialize proximity filter with training data.
 
         Args:
             training_triples: Array of shape (N, 3) with [head, relation, tail]
+            cache_path: Optional path to cache the graph object. If provided:
+                       - Loads from cache if exists and matches training data
+                       - Saves to cache after building if doesn't exist
         """
         self.training_triples = training_triples
+        self.cache_path = cache_path
 
-        # Build PyG graph
-        self._build_pyg_graph()
+        # Try to load from cache
+        if cache_path and self._load_from_cache():
+            logger.info(f"Loaded graph from cache: {cache_path}")
+        else:
+            # Build PyG graph from scratch
+            self._build_pyg_graph()
+            logger.info(f"Built new graph with {len(training_triples)} training triples")
 
-        logger.info(f"Initialized PyG filter with {len(training_triples)} training triples")
+            # Save to cache if requested
+            if cache_path:
+                self._save_to_cache()
+                logger.info(f"Saved graph to cache: {cache_path}")
 
     def _build_pyg_graph(self):
         """Build PyTorch Geometric graph from training triples."""
@@ -78,6 +95,91 @@ class ProximityFilterPyG:
 
             self.edge_to_triples[(h, t)].append(idx)
             self.edge_to_triples[(t, h)].append(idx)
+
+    def _compute_data_hash(self) -> str:
+        """Compute hash of training data for cache validation.
+
+        Returns:
+            MD5 hash string of the training triples
+        """
+        # Create hash from training triples content
+        data_bytes = self.training_triples.tobytes()
+        return hashlib.md5(data_bytes).hexdigest()
+
+    def _save_to_cache(self):
+        """Save graph object to cache file."""
+        try:
+            cache_dir = Path(self.cache_path).parent
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            cache_data = {
+                'edge_index': self.edge_index,
+                'edge_relations': self.edge_relations,
+                'node_degrees': self.node_degrees,
+                'edge_to_triples': self.edge_to_triples,
+                'data_hash': self._compute_data_hash(),
+                'num_triples': len(self.training_triples)
+            }
+
+            with open(self.cache_path, 'wb') as f:
+                pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+            logger.info(f"Graph cached successfully ({len(self.training_triples)} triples)")
+
+        except Exception as e:
+            logger.warning(f"Failed to save cache: {e}")
+
+    def _load_from_cache(self) -> bool:
+        """Load graph object from cache file.
+
+        Returns:
+            True if successfully loaded, False otherwise
+        """
+        try:
+            if not Path(self.cache_path).exists():
+                logger.info(f"Cache file not found: {self.cache_path}")
+                return False
+
+            with open(self.cache_path, 'rb') as f:
+                cache_data = pickle.load(f)
+
+            # Validate cache matches current data
+            current_hash = self._compute_data_hash()
+            cached_hash = cache_data.get('data_hash', '')
+
+            if current_hash != cached_hash:
+                logger.warning(f"Cache invalidated: training data has changed")
+                return False
+
+            # Load cached data
+            self.edge_index = cache_data['edge_index']
+            self.edge_relations = cache_data['edge_relations']
+            self.node_degrees = cache_data['node_degrees']
+            self.edge_to_triples = cache_data['edge_to_triples']
+
+            logger.info(f"Successfully loaded graph from cache ({cache_data['num_triples']} triples)")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to load cache: {e}")
+            return False
+
+    @classmethod
+    def from_cache_or_build(
+        cls,
+        training_triples: np.ndarray,
+        cache_path: str
+    ) -> 'ProximityFilterPyG':
+        """Factory method to load from cache or build new graph.
+
+        Args:
+            training_triples: Training triples array
+            cache_path: Path to cache file
+
+        Returns:
+            ProximityFilterPyG instance
+        """
+        return cls(training_triples, cache_path=cache_path)
 
     def filter_for_single_test_triple(
         self,
@@ -304,7 +406,8 @@ def filter_training_file(
     n_hops: int = 2,
     min_degree: int = 2,
     preserve_test_entity_edges: bool = True,
-    use_single_triple_mode: bool = False
+    use_single_triple_mode: bool = False,
+    cache_path: Optional[str] = None
 ):
     """Filter training file based on proximity to test triples using PyG.
 
@@ -316,6 +419,7 @@ def filter_training_file(
         min_degree: Minimum degree threshold
         preserve_test_entity_edges: Keep edges with test entities
         use_single_triple_mode: If True, analyze first test triple only
+        cache_path: Optional path to cache the graph object for reuse
     """
     logger.info(f"Loading training triples from {train_path}")
     train_triples = []
@@ -371,8 +475,8 @@ def filter_training_file(
         for h, r, t in test_triples
     ])
 
-    # Create PyG filter
-    filter_obj = ProximityFilterPyG(train_numeric)
+    # Create PyG filter (with optional caching)
+    filter_obj = ProximityFilterPyG(train_numeric, cache_path=cache_path)
 
     # Filter
     if use_single_triple_mode and len(test_numeric) > 0:
@@ -469,10 +573,20 @@ Benefits of PyG version:
                         help='Number of hops from test triples (default: 2)')
     parser.add_argument('--min-degree', type=int, default=2,
                         help='Minimum degree threshold (default: 2)')
-    parser.add_argument('--preserve-test-edges', action='store_true', default=True,
-                        help='Always preserve edges containing test entities (default: True)')
+    # Mutually exclusive group for preserve-test-edges
+    preserve_group = parser.add_mutually_exclusive_group()
+    preserve_group.add_argument('--preserve-test-edges', dest='preserve_test_edges',
+                               action='store_true',
+                               help='Always preserve edges containing test entities (default)')
+    preserve_group.add_argument('--no-preserve-test-edges', dest='preserve_test_edges',
+                               action='store_false',
+                               help='Apply strict degree filtering to all edges')
+    parser.set_defaults(preserve_test_edges=True)
+
     parser.add_argument('--single-triple', action='store_true',
                         help='Filter for single test triple only (first one)')
+    parser.add_argument('--cache', type=str,
+                        help='Path to cache the graph object (speeds up repeated runs)')
 
     args = parser.parse_args()
 
@@ -483,5 +597,6 @@ Benefits of PyG version:
         n_hops=args.n_hops,
         min_degree=args.min_degree,
         preserve_test_entity_edges=args.preserve_test_edges,
-        use_single_triple_mode=args.single_triple
+        use_single_triple_mode=args.single_triple,
+        cache_path=args.cache
     )
