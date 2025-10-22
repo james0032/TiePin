@@ -507,6 +507,11 @@ def filter_training_file(
 
     # Write filtered triples
     logger.info(f"Writing {len(filtered_triples)} filtered triples to {output_path}")
+
+    # Create output directory if it doesn't exist
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     with open(output_path, 'w') as f:
         for h, r, t in filtered_triples:
             f.write(f"{h}\t{r}\t{t}\n")
