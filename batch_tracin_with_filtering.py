@@ -69,8 +69,6 @@ def filter_training_data(
     train_file: str,
     test_triple_file: str,
     output_file: str,
-    entity_to_id: str,
-    relation_to_id: str,
     n_hops: int = 2,
     min_degree: int = 2,
     cache_path: str = None,
@@ -82,8 +80,6 @@ def filter_training_data(
         train_file: Path to training triples
         test_triple_file: Path to single test triple file
         output_file: Path to write filtered training data
-        entity_to_id: Path to entity_to_id.tsv
-        relation_to_id: Path to relation_to_id.tsv
         n_hops: Number of hops for proximity filtering
         min_degree: Minimum degree threshold
         cache_path: Optional path to cached graph
@@ -363,8 +359,6 @@ Example:
                 train_file=args.train,
                 test_triple_file=str(temp_triple_file),
                 output_file=str(filtered_train_file),
-                entity_to_id=args.entity_to_id,
-                relation_to_id=args.relation_to_id,
                 n_hops=args.n_hops,
                 min_degree=args.min_degree,
                 cache_path=args.cache,

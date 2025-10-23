@@ -515,8 +515,8 @@ def parse_args():
         help='Maximum number of test triples to analyze (for speed)'
     )
     parser.add_argument(
-        '--top-k', type=int, default=10,
-        help='Number of top influential triples to return per test triple'
+        '--top-k', type=int, default=None,
+        help='Number of top influential triples to return per test triple (default: None = all influences)'
     )
     parser.add_argument(
         '--learning-rate', type=float, default=0.001,
