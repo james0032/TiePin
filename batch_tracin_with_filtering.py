@@ -97,8 +97,6 @@ def filter_training_data(
         '--train', train_file,
         '--test', test_triple_file,
         '--output', output_file,
-        '--entity-to-id', entity_to_id,
-        '--relation-to-id', relation_to_id,
         '--n-hops', str(n_hops),
         '--min-degree', str(min_degree),
         '--single-triple'
@@ -172,6 +170,8 @@ def run_tracin_analysis(
         '--test', test_triple_file,
         '--entity-to-id', entity_to_id,
         '--relation-to-id', relation_to_id,
+        '--edge-map', edge_map,
+        '--node-name-dict', node_name_dict,
         '--output', output_json,
         '--csv-output', output_csv,
         '--mode', 'single',

@@ -52,7 +52,7 @@ python batch_tracin_with_filtering.py \
     --min-degree 2 \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
-    --batch-size 512 \
+    --batch-size 4 \
     --num-last-layers 2
 
 echo ""
