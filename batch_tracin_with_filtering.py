@@ -1,0 +1,457 @@
+#!/usr/bin/env python
+"""
+Batch TracIn Analysis with Training Data Filtering
+
+This script:
+1. Reads a list of test triples
+2. For each triple, filters the training data by proximity
+3. Runs TracIn analysis using the filtered training data
+4. Generates CSV output with influence scores
+
+This approach significantly speeds up TracIn by reducing training data size.
+"""
+
+import argparse
+import json
+import logging
+import subprocess
+import sys
+from pathlib import Path
+from typing import List, Tuple
+import time
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+def sanitize_filename(text: str) -> str:
+    """Sanitize text to be safe for filenames."""
+    return text.replace(':', '_').replace('/', '_').replace(' ', '_')
+
+
+def read_test_triples(test_file: str) -> List[Tuple[str, str, str]]:
+    """Read test triples from file.
+
+    Args:
+        test_file: Path to test triples file (tab-separated)
+
+    Returns:
+        List of (head, relation, tail) tuples
+    """
+    triples = []
+    with open(test_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split('\t')
+            if len(parts) == 3:
+                triples.append(tuple(parts))
+    return triples
+
+
+def create_single_triple_file(triple: Tuple[str, str, str], output_path: str):
+    """Create a file with a single test triple.
+
+    Args:
+        triple: (head, relation, tail) tuple
+        output_path: Path to write the triple file
+    """
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, 'w') as f:
+        f.write(f"{triple[0]}\t{triple[1]}\t{triple[2]}\n")
+
+
+def filter_training_data(
+    train_file: str,
+    test_triple_file: str,
+    output_file: str,
+    entity_to_id: str,
+    relation_to_id: str,
+    n_hops: int = 2,
+    min_degree: int = 2,
+    cache_path: str = None,
+    preserve_test_edges: bool = True
+) -> bool:
+    """Filter training data by proximity to test triple.
+
+    Args:
+        train_file: Path to training triples
+        test_triple_file: Path to single test triple file
+        output_file: Path to write filtered training data
+        entity_to_id: Path to entity_to_id.tsv
+        relation_to_id: Path to relation_to_id.tsv
+        n_hops: Number of hops for proximity filtering
+        min_degree: Minimum degree threshold
+        cache_path: Optional path to cached graph
+        preserve_test_edges: Whether to preserve edges containing test entities
+
+    Returns:
+        True if successful, False otherwise
+    """
+    cmd = [
+        'python', 'filter_training_by_proximity_pyg.py',
+        '--train', train_file,
+        '--test', test_triple_file,
+        '--output', output_file,
+        '--entity-to-id', entity_to_id,
+        '--relation-to-id', relation_to_id,
+        '--n-hops', str(n_hops),
+        '--min-degree', str(min_degree),
+        '--single-triple'
+    ]
+
+    if cache_path:
+        cmd.extend(['--cache', cache_path])
+
+    if not preserve_test_edges:
+        cmd.append('--no-preserve-test-edges')
+
+    logger.info(f"Running: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        logger.info("Filtering completed successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Filtering failed: {e}")
+        logger.error(f"Stdout: {e.stdout}")
+        logger.error(f"Stderr: {e.stderr}")
+        return False
+
+
+def run_tracin_analysis(
+    model_path: str,
+    train_file: str,
+    test_triple_file: str,
+    entity_to_id: str,
+    relation_to_id: str,
+    output_json: str,
+    output_csv: str,
+    edge_map: str = None,
+    node_name_dict: str = None,
+    top_k: int = None,
+    device: str = 'cuda',
+    use_last_layers: bool = True,
+    num_last_layers: int = 2,
+    batch_size: int = 512
+) -> bool:
+    """Run TracIn analysis on a single test triple.
+
+    Args:
+        model_path: Path to trained model
+        train_file: Path to (filtered) training data
+        test_triple_file: Path to single test triple file
+        entity_to_id: Path to entity_to_id.tsv
+        relation_to_id: Path to relation_to_id.tsv
+        output_json: Path to write JSON output
+        output_csv: Path to write CSV output
+        edge_map: Optional path to edge_map.json
+        node_name_dict: Optional path to node_name_dict.txt
+        top_k: Number of top influences to compute (None = all influences)
+        device: Device to use (cuda/cpu)
+        use_last_layers: Whether to use last layers only
+        num_last_layers: Number of last layers to track
+        batch_size: Batch size for processing
+
+    Returns:
+        True if successful, False otherwise
+    """
+    cmd = [
+        'python', 'run_tracin.py',
+        '--model-path', model_path,
+        '--train', train_file,
+        '--test', test_triple_file,
+        '--entity-to-id', entity_to_id,
+        '--relation-to-id', relation_to_id,
+        '--output', output_json,
+        '--csv-output', output_csv,
+        '--mode', 'single',
+        '--test-indices', '0',
+        '--device', device,
+        '--batch-size', str(batch_size)
+    ]
+
+    # Only add top-k if specified (None means return all influences)
+    if top_k is not None:
+        cmd.extend(['--top-k', str(top_k)])
+
+    if use_last_layers:
+        cmd.extend(['--use-last-layers-only', '--num-last-layers', str(num_last_layers)])
+
+    if edge_map:
+        cmd.extend(['--edge-map', edge_map])
+
+    if node_name_dict:
+        cmd.extend(['--node-name-dict', node_name_dict])
+
+    logger.info(f"Running: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        logger.info("TracIn analysis completed successfully")
+        logger.info(result.stdout)
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"TracIn analysis failed: {e}")
+        logger.error(f"Stdout: {e.stdout}")
+        logger.error(f"Stderr: {e.stderr}")
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Batch TracIn analysis with training data filtering',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Example:
+  python batch_tracin_with_filtering.py \\
+      --test-triples examples/20251017_top_test_triples.txt \\
+      --model-path model.pt \\
+      --train train.txt \\
+      --entity-to-id entity_to_id.tsv \\
+      --relation-to-id relation_to_id.tsv \\
+      --edge-map edge_map.json \\
+      --node-name-dict node_name_dict.txt \\
+      --output-dir results/batch_tracin \\
+      --n-hops 2 \\
+      --device cuda
+        """
+    )
+
+    # Required arguments
+    parser.add_argument('--test-triples', type=str, required=True,
+                        help='Path to test triples file')
+    parser.add_argument('--model-path', type=str, required=True,
+                        help='Path to trained model (.pt)')
+    parser.add_argument('--train', type=str, required=True,
+                        help='Path to training triples')
+    parser.add_argument('--entity-to-id', type=str, required=True,
+                        help='Path to entity_to_id.tsv')
+    parser.add_argument('--relation-to-id', type=str, required=True,
+                        help='Path to relation_to_id.tsv')
+    parser.add_argument('--output-dir', type=str, required=True,
+                        help='Output directory for results')
+
+    # Optional arguments
+    parser.add_argument('--edge-map', type=str,
+                        help='Path to edge_map.json (optional)')
+    parser.add_argument('--node-name-dict', type=str,
+                        help='Path to node_name_dict.txt (optional)')
+
+    # Filtering parameters
+    parser.add_argument('--n-hops', type=int, default=2,
+                        help='Number of hops for proximity filtering (default: 2)')
+    parser.add_argument('--min-degree', type=int, default=2,
+                        help='Minimum degree threshold (default: 2)')
+    parser.add_argument('--cache', type=str,
+                        help='Path to cache graph (optional, speeds up filtering)')
+    parser.add_argument('--no-preserve-test-edges', action='store_true',
+                        help='Do not preserve edges containing test entities')
+
+    # TracIn parameters
+    parser.add_argument('--top-k', type=int, default=None,
+                        help='Number of top influences (default: None = all influences)')
+    parser.add_argument('--device', type=str, default='cuda',
+                        choices=['cuda', 'cpu'],
+                        help='Device to use (default: cuda)')
+    parser.add_argument('--batch-size', type=int, default=512,
+                        help='Batch size (default: 512)')
+    parser.add_argument('--no-use-last-layers', action='store_true',
+                        help='Do not use last layers only (slower but more accurate)')
+    parser.add_argument('--num-last-layers', type=int, default=2,
+                        help='Number of last layers to track (default: 2)')
+
+    # Execution control
+    parser.add_argument('--start-index', type=int, default=0,
+                        help='Start from this triple index (default: 0)')
+    parser.add_argument('--max-triples', type=int,
+                        help='Maximum number of triples to process (default: all)')
+    parser.add_argument('--skip-filtering', action='store_true',
+                        help='Skip filtering step (use existing filtered files)')
+    parser.add_argument('--skip-tracin', action='store_true',
+                        help='Skip TracIn step (only do filtering)')
+
+    args = parser.parse_args()
+
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    filtered_dir = output_dir / 'filtered_training'
+    filtered_dir.mkdir(exist_ok=True)
+
+    temp_dir = output_dir / 'temp_triples'
+    temp_dir.mkdir(exist_ok=True)
+
+    # Read test triples
+    logger.info(f"Reading test triples from {args.test_triples}")
+    test_triples = read_test_triples(args.test_triples)
+    logger.info(f"Found {len(test_triples)} test triples")
+
+    # Apply start index and max triples
+    if args.start_index > 0:
+        test_triples = test_triples[args.start_index:]
+        logger.info(f"Starting from index {args.start_index}")
+
+    if args.max_triples:
+        test_triples = test_triples[:args.max_triples]
+        logger.info(f"Processing up to {args.max_triples} triples")
+
+    # Process each test triple
+    summary = {
+        'total_triples': len(test_triples),
+        'successful': 0,
+        'failed_filtering': 0,
+        'failed_tracin': 0,
+        'skipped': 0,
+        'results': []
+    }
+
+    start_time = time.time()
+
+    for idx, triple in enumerate(test_triples):
+        head, rel, tail = triple
+        triple_idx = args.start_index + idx
+
+        logger.info("=" * 80)
+        logger.info(f"Processing triple {triple_idx + 1}/{args.start_index + len(test_triples)}: {head} --[{rel}]--> {tail}")
+        logger.info("=" * 80)
+
+        # Create sanitized filename
+        head_clean = sanitize_filename(head)
+        tail_clean = sanitize_filename(tail)
+        base_name = f"triple_{triple_idx:03d}_{head_clean}_{tail_clean}"
+
+        # Paths
+        temp_triple_file = temp_dir / f"{base_name}.txt"
+        filtered_train_file = filtered_dir / f"{base_name}_filtered_train.txt"
+        output_json = output_dir / f"{base_name}_tracin.json"
+        output_csv = output_dir / f"{base_name}_tracin.csv"
+
+        result = {
+            'index': triple_idx,
+            'triple': {'head': head, 'relation': rel, 'tail': tail},
+            'base_name': base_name,
+            'filtering_success': False,
+            'tracin_success': False,
+            'filtered_train_file': str(filtered_train_file),
+            'output_csv': str(output_csv)
+        }
+
+        # Step 1: Create single triple file
+        create_single_triple_file(triple, str(temp_triple_file))
+        logger.info(f"Created test triple file: {temp_triple_file}")
+
+        # Step 2: Filter training data
+        if not args.skip_filtering:
+            logger.info("Step 1/2: Filtering training data...")
+            filter_success = filter_training_data(
+                train_file=args.train,
+                test_triple_file=str(temp_triple_file),
+                output_file=str(filtered_train_file),
+                entity_to_id=args.entity_to_id,
+                relation_to_id=args.relation_to_id,
+                n_hops=args.n_hops,
+                min_degree=args.min_degree,
+                cache_path=args.cache,
+                preserve_test_edges=not args.no_preserve_test_edges
+            )
+
+            result['filtering_success'] = filter_success
+
+            if not filter_success:
+                logger.error(f"Filtering failed for triple {triple_idx}")
+                summary['failed_filtering'] += 1
+                summary['results'].append(result)
+                continue
+        else:
+            logger.info("Skipping filtering (using existing filtered file)")
+            if not filtered_train_file.exists():
+                logger.error(f"Filtered file not found: {filtered_train_file}")
+                summary['failed_filtering'] += 1
+                summary['results'].append(result)
+                continue
+            result['filtering_success'] = True
+
+        # Step 3: Run TracIn analysis
+        if not args.skip_tracin:
+            logger.info("Step 2/2: Running TracIn analysis...")
+            tracin_success = run_tracin_analysis(
+                model_path=args.model_path,
+                train_file=str(filtered_train_file),
+                test_triple_file=str(temp_triple_file),
+                entity_to_id=args.entity_to_id,
+                relation_to_id=args.relation_to_id,
+                output_json=str(output_json),
+                output_csv=str(output_csv),
+                edge_map=args.edge_map,
+                node_name_dict=args.node_name_dict,
+                top_k=args.top_k,
+                device=args.device,
+                use_last_layers=not args.no_use_last_layers,
+                num_last_layers=args.num_last_layers,
+                batch_size=args.batch_size
+            )
+
+            result['tracin_success'] = tracin_success
+
+            if tracin_success:
+                summary['successful'] += 1
+                logger.info(f"✓ Successfully completed triple {triple_idx}")
+                logger.info(f"  CSV output: {output_csv}")
+            else:
+                logger.error(f"✗ TracIn failed for triple {triple_idx}")
+                summary['failed_tracin'] += 1
+        else:
+            logger.info("Skipping TracIn analysis")
+            summary['skipped'] += 1
+            result['tracin_success'] = None
+
+        summary['results'].append(result)
+
+    # Calculate elapsed time
+    elapsed_time = time.time() - start_time
+    summary['elapsed_time_seconds'] = elapsed_time
+    summary['elapsed_time_formatted'] = f"{elapsed_time // 3600:.0f}h {(elapsed_time % 3600) // 60:.0f}m {elapsed_time % 60:.0f}s"
+
+    # Save summary
+    summary_file = output_dir / 'batch_tracin_summary.json'
+    with open(summary_file, 'w') as f:
+        json.dump(summary, f, indent=2)
+
+    logger.info("=" * 80)
+    logger.info("BATCH PROCESSING COMPLETE")
+    logger.info("=" * 80)
+    logger.info(f"Total triples processed: {summary['total_triples']}")
+    logger.info(f"Successful: {summary['successful']}")
+    logger.info(f"Failed (filtering): {summary['failed_filtering']}")
+    logger.info(f"Failed (TracIn): {summary['failed_tracin']}")
+    logger.info(f"Skipped: {summary['skipped']}")
+    logger.info(f"Elapsed time: {summary['elapsed_time_formatted']}")
+    logger.info(f"Summary saved to: {summary_file}")
+    logger.info("=" * 80)
+
+    # Print output file locations
+    if summary['successful'] > 0:
+        logger.info("\nOutput files:")
+        logger.info(f"  Filtered training data: {filtered_dir}")
+        logger.info(f"  TracIn CSV files: {output_dir}/*_tracin.csv")
+        logger.info(f"  TracIn JSON files: {output_dir}/*_tracin.json")
+
+
+if __name__ == '__main__':
+    main()
