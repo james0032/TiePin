@@ -40,7 +40,7 @@ echo "========================================"
 echo ""
 
 python batch_tracin_with_filtering.py \
-    --test-triples "examples/${TEST_TRIPLES}" \
+    --test-triples "${TEST_TRIPLES}" \
     --model-path "${MODEL_PATH}" \
     --train "${TRAIN_FILE}" \
     --entity-to-id "${ENTITY_TO_ID}" \
