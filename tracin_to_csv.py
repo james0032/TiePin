@@ -224,6 +224,20 @@ def run_tracin_and_save_csv(
 
     logger.info(f"  Computed {len(influences)} influences")
 
+    # Compute self-influence for the test triple
+    logger.info(f"\nComputing self-influence...")
+    test_h, test_r, test_t = test_triple
+    grad = analyzer.compute_gradient(test_h, test_r, test_t, label=1.0)
+
+    # Compute squared L2 norm of gradient (self-influence)
+    self_influence = 0.0
+    for name in grad:
+        grad_flat = grad[name].flatten()
+        self_influence += torch.dot(grad_flat, grad_flat).item()
+    self_influence *= learning_rate
+
+    logger.info(f"  Self-influence: {self_influence:.6f}")
+
     # Save to CSV
     logger.info(f"\nSaving results to CSV: {output_csv}")
     analyzer.save_influences_to_csv(
@@ -233,7 +247,8 @@ def run_tracin_and_save_csv(
         id_to_entity=id_to_entity,
         id_to_relation=id_to_relation,
         entity_labels=entity_labels,
-        relation_labels=relation_labels
+        relation_labels=relation_labels,
+        self_influence=self_influence
     )
 
     logger.info("\n" + "=" * 80)

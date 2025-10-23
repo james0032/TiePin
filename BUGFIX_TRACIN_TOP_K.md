@@ -44,6 +44,36 @@ parser.add_argument(
 
 ---
 
+### Fix 1b: Handle None in Display Logic
+
+**File:** [run_tracin.py](run_tracin.py:397-403)
+
+**Error encountered:**
+```
+TypeError: '<' not supported between instances of 'NoneType' and 'int'
+```
+
+**Root Cause:**
+```python
+# BEFORE (BUG)
+logger.info(f"Top-{min(5, top_k)} influential training triples:")
+# When top_k=None, min(5, None) raises TypeError
+```
+
+**Fix:**
+```python
+# AFTER (FIXED)
+display_count = 5 if top_k is None else min(5, top_k)
+logger.info(f"Top-{display_count} influential training triples:")
+for i, inf in enumerate(influences[:display_count]):
+    logger.info(f"  {i+1}. ({inf['train_head']}, {inf['train_relation']}, {inf['train_tail']})")
+    logger.info(f"     Influence: {inf['influence']:.6f}")
+```
+
+**Effect:** Properly handles `top_k=None` when displaying results in logs (shows top 5 for preview).
+
+---
+
 ### Fix 2: Remove Unused Parameters
 
 **File:** [batch_tracin_with_filtering.py](batch_tracin_with_filtering.py:68-76)
@@ -212,10 +242,11 @@ python batch_tracin_with_filtering.py ... 2>&1 | grep "unrecognized arguments"
 
 ## Summary
 
-✅ **Bug 1 Fixed:** Changed run_tracin.py default from `--top-k 10` to `--top-k None`
+✅ **Bug 1a Fixed:** Changed run_tracin.py default from `--top-k 10` to `--top-k None`
+✅ **Bug 1b Fixed:** Handle `top_k=None` in display logic (TypeError fix)
 ✅ **Bug 2 Fixed:** Removed unused entity_to_id/relation_to_id parameters
 ✅ **Result:** Now returns ALL influences instead of just 10
-✅ **No Errors:** No more "unrecognized arguments" error
+✅ **No Errors:** No more "unrecognized arguments" or TypeError
 
 **The batch TracIn script now correctly returns complete influence data for all test triples!**
 

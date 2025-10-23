@@ -524,7 +524,8 @@ class TracInAnalyzer:
         id_to_entity: Dict[int, str],
         id_to_relation: Dict[int, str],
         entity_labels: Optional[Dict[int, str]] = None,
-        relation_labels: Optional[Dict[int, str]] = None
+        relation_labels: Optional[Dict[int, str]] = None,
+        self_influence: Optional[float] = None
     ):
         """Save TracIn influences to CSV with IDs and labels.
 
@@ -536,6 +537,7 @@ class TracInAnalyzer:
             id_to_relation: Mapping from relation index to relation CURIE (may contain JSON strings)
             entity_labels: Optional mapping from entity index to human-readable name
             relation_labels: Optional mapping from relation index to human-readable name
+            self_influence: Optional self-influence score for the test triple
         """
         test_h, test_r, test_t = test_triple
 
@@ -545,7 +547,7 @@ class TracInAnalyzer:
         with open(output_path, 'w', newline='') as f:
             writer = csv.writer(f)
 
-            # Write header - exactly as requested
+            # Write header - exactly as requested, with SelfInfluence added
             writer.writerow([
                 'TestHead', 'TestHead_label',
                 'TestRel', 'TestRel_label',
@@ -553,7 +555,8 @@ class TracInAnalyzer:
                 'TrainHead', 'TrainHead_label',
                 'TrainRel', 'TrainRel_label',
                 'TrainTail', 'TrainTail_label',
-                'TracInScore'
+                'TracInScore',
+                'SelfInfluence'
             ])
 
             # Get test triple IDs
@@ -596,7 +599,8 @@ class TracInAnalyzer:
                     train_h_id, train_h_label,
                     train_r_id, train_r_label,
                     train_t_id, train_t_label,
-                    score
+                    score,
+                    self_influence if self_influence is not None else ''
                 ])
 
         logger.info(f"Saved {len(influences)} influences to CSV: {output_path}")

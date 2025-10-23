@@ -332,7 +332,8 @@ def run_tracin_analysis(
                         id_to_entity=id_to_entity,
                         id_to_relation=id_to_relation,
                         entity_labels=idx_to_entity_name,
-                        relation_labels=relation_labels if relation_labels else None
+                        relation_labels=relation_labels if relation_labels else None,
+                        self_influence=self_influence
                     )
 
             logger.info(f"\nAnalyzed {len(test_triple_list)} test triples")
@@ -394,8 +395,11 @@ def run_tracin_analysis(
             self_influence *= learning_rate
 
             logger.info(f"Self-influence: {self_influence:.6f}")
-            logger.info(f"Top-{min(5, top_k)} influential training triples:")
-            for i, inf in enumerate(influences[:5]):
+
+            # Determine how many to display
+            display_count = 5 if top_k is None else min(5, top_k)
+            logger.info(f"Top-{display_count} influential training triples:")
+            for i, inf in enumerate(influences[:display_count]):
                 logger.info(f"  {i+1}. ({inf['train_head']}, {inf['train_relation']}, {inf['train_tail']})")
                 logger.info(f"     Influence: {inf['influence']:.6f}")
 
@@ -446,7 +450,8 @@ def run_tracin_analysis(
                     id_to_entity=id_to_entity,
                     id_to_relation=id_to_relation,
                     entity_labels=idx_to_entity_name,
-                    relation_labels=relation_labels if relation_labels else None
+                    relation_labels=relation_labels if relation_labels else None,
+                    self_influence=self_influence
                 )
 
         # Save JSON results
