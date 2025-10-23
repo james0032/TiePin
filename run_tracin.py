@@ -98,19 +98,18 @@ def run_tracin_analysis(
             edge_map = json.load(f)
 
         # Parse edge map: extract predicate from JSON key and map from predicate:N to predicate name
+        # edge_map format: {"json_string": "predicate:0", ...}
         for json_key, predicate_id in edge_map.items():
             try:
                 # Parse the JSON key to extract predicate
                 pred_details = json.loads(json_key)
                 predicate_name = pred_details.get('predicate', '')
 
-                # Get the index from predicate:N
-                if predicate_id in relation_to_id.values():
-                    # Find which index this predicate_id corresponds to
-                    for rel_curie, rel_idx in relation_to_id.items():
-                        if rel_curie == predicate_id:
-                            idx_to_predicate[rel_idx] = predicate_name
-                            break
+                # Check if predicate_id is in relation_to_id keys (like "predicate:27")
+                if predicate_id in relation_to_id:
+                    # Get the index for this predicate_id
+                    rel_idx = relation_to_id[predicate_id]
+                    idx_to_predicate[rel_idx] = predicate_name
             except json.JSONDecodeError:
                 continue
 
