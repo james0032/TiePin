@@ -14,7 +14,7 @@ NODE_NAME_DICT="/workspace/data/robokop/CGGD_alltreat/node_name_dict.txt"
 GRAPH_CACHE="/workspace/data/robokop/CGGD_alltreat/processed/train_graph_cache.pkl"
 
 # Test triples file
-TEST_TRIPLES="/workspace/data/robokop/CGGD_alltreat/examples/20251017_top_test_triples.txt"
+TEST_TRIPLES="/workspace/data/robokop/CGGD_alltreat/results/20251017_top_test_triples.txt"
 
 # Output directory
 OUTPUT_DIR="/workspace/data/robokop/CGGD_alltreat/results/batch_tracin_top25"
