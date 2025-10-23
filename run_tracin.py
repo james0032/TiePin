@@ -44,7 +44,8 @@ def run_tracin_analysis(
     batch_size: int = 256,
     use_last_layers_only: bool = False,
     last_layer_names: list = None,
-    num_last_layers: int = 2
+    num_last_layers: int = 2,
+    csv_output: str = None
 ):
     """Run TracIn analysis.
 
@@ -54,7 +55,9 @@ def run_tracin_analysis(
         test_path: Path to test triples
         entity_to_id_path: Path to entity_to_id.tsv
         relation_to_id_path: Path to relation_to_id.tsv
-        output_path: Path to save results
+        output_path: Path to save results (JSON)
+        edge_map_path: Path to edge_map.json for predicate names (optional)
+        node_name_dict_path: Path to node_name_dict.txt for entity names (optional)
         mode: Analysis mode ('test', 'self', or 'single')
         test_triple_indices: Specific test triple indices to analyze (for single mode)
         max_test_triples: Maximum number of test triples to analyze
@@ -68,6 +71,7 @@ def run_tracin_analysis(
         use_last_layers_only: If True, only compute gradients for last layers (MUCH faster!)
         last_layer_names: Specific layer names to track (optional, auto-detects if None)
         num_last_layers: Number of last layers to track when auto-detecting (default: 2)
+        csv_output: Optional path to save results in CSV format with exact header format
     """
     logger.info("Loading model and data...")
 
@@ -298,13 +302,38 @@ def run_tracin_analysis(
                 result['top_k'] = top_k
                 result['learning_rate'] = learning_rate
 
-                # Save to separate file
+                # Save to separate JSON file
                 triple_output = output_dir / f"tracin_test_{test_idx}.json"
                 with open(triple_output, 'w') as f:
                     json.dump(result, f, indent=2)
 
                 logger.info(f"  Self-influence: {self_influence:.6f}")
-                logger.info(f"  Saved to {triple_output}")
+                logger.info(f"  Saved JSON to {triple_output}")
+
+                # Save CSV if requested
+                if csv_output:
+                    csv_dir = Path(csv_output).parent
+                    csv_stem = Path(csv_output).stem
+                    csv_ext = Path(csv_output).suffix
+                    csv_file = csv_dir / f"{csv_stem}_test_{test_idx}{csv_ext}"
+
+                    logger.info(f"  Saving CSV to {csv_file}")
+
+                    # Prepare relation labels from idx_to_predicate if available
+                    relation_labels = {}
+                    if idx_to_predicate:
+                        for rel_idx, predicate_name in idx_to_predicate.items():
+                            relation_labels[rel_idx] = json.dumps({"predicate": predicate_name})
+
+                    analyzer.save_influences_to_csv(
+                        test_triple=test_triple,
+                        influences=influences,
+                        output_path=str(csv_file),
+                        id_to_entity=id_to_entity,
+                        id_to_relation=id_to_relation,
+                        entity_labels=idx_to_entity_name,
+                        relation_labels=relation_labels if relation_labels else None
+                    )
 
             logger.info(f"\nAnalyzed {len(test_triple_list)} test triples")
             logger.info(f"Results saved to {output_dir}/tracin_test_*.json")
@@ -388,10 +417,42 @@ def run_tracin_analysis(
             result_dict['influences'] = influences
             results.append(result_dict)
 
-        # Save results
+            # Save CSV output if requested
+            if csv_output:
+                # Determine CSV filename for this test triple
+                if len(test_triple_indices) == 1:
+                    csv_file = csv_output
+                else:
+                    # Multiple test triples - create separate CSV for each
+                    csv_dir = Path(csv_output).parent
+                    csv_stem = Path(csv_output).stem
+                    csv_ext = Path(csv_output).suffix
+                    csv_file = csv_dir / f"{csv_stem}_test_{idx}{csv_ext}"
+
+                logger.info(f"Saving CSV output to {csv_file}")
+
+                # Prepare relation labels from idx_to_predicate if available
+                relation_labels = {}
+                if idx_to_predicate:
+                    # Convert idx_to_predicate to JSON strings for extraction
+                    for rel_idx, predicate_name in idx_to_predicate.items():
+                        # Create a minimal JSON string with just the predicate field
+                        relation_labels[rel_idx] = json.dumps({"predicate": predicate_name})
+
+                analyzer.save_influences_to_csv(
+                    test_triple=test_triple,
+                    influences=influences,
+                    output_path=str(csv_file),
+                    id_to_entity=id_to_entity,
+                    id_to_relation=id_to_relation,
+                    entity_labels=idx_to_entity_name,
+                    relation_labels=relation_labels if relation_labels else None
+                )
+
+        # Save JSON results
         with open(output_path, 'w') as f:
             json.dump(results, f, indent=2)
-        logger.info(f"\nResults saved to {output_path}")
+        logger.info(f"\nJSON results saved to {output_path}")
 
     else:
         raise ValueError(f"Unknown mode: {mode}")
@@ -433,6 +494,10 @@ def parse_args():
     parser.add_argument(
         '--output', '-o', type=str, required=True,
         help='Output path for results (JSON)'
+    )
+    parser.add_argument(
+        '--csv-output', type=str,
+        help='Optional: Output path for CSV format results with labels'
     )
 
     parser.add_argument(
@@ -525,7 +590,8 @@ def main():
         output_per_triple=args.output_per_triple,
         batch_size=args.batch_size,
         use_last_layers_only=args.use_last_layers_only,
-        last_layer_names=args.last_layer_names
+        last_layer_names=args.last_layer_names,
+        csv_output=args.csv_output
     )
 
     logger.info("\nTracIn analysis completed!")
