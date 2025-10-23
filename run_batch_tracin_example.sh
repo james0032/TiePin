@@ -8,7 +8,7 @@
 MODEL_PATH="/workspace/data/robokop/CGGD_alltreat/checkpoints/conve_checkpoint_004.pt"
 TRAIN_FILE="/workspace/data/robokop/CGGD_alltreat/train.txt"
 ENTITY_TO_ID="/workspace/data/robokop/CGGD_alltreat/processed/entity_to_id.tsv"
-RELATION_TO_ID="/workspace/data/robokop/CGGD_alltreat/processed/elation_to_id.tsv"
+RELATION_TO_ID="/workspace/data/robokop/CGGD_alltreat/processed/relation_to_id.tsv"
 EDGE_MAP="/workspace/data/robokop/CGGD_alltreat/edge_map.json"
 NODE_NAME_DICT="/workspace/data/robokop/CGGD_alltreat/node_name_dict.txt"
 GRAPH_CACHE="/workspace/data/robokop/CGGD_alltreat/processed/train_graph_cache.pkl"
