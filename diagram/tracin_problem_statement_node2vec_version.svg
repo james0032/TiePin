@@ -1,0 +1,121 @@
+<svg viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+  <!-- Title -->
+  <text x="400" y="30" font-size="20" font-weight="bold" text-anchor="middle" fill="#2c3e50">
+    Problem: Explaining Link Prediction Decisions
+  </text>
+  
+  <!-- Question Box -->
+  <rect x="250" y="50" width="300" height="60" fill="#e74c3c" opacity="0.1" stroke="#e74c3c" stroke-width="2" rx="5"/>
+  <text x="400" y="75" font-size="16" font-weight="bold" text-anchor="middle" fill="#e74c3c">
+    ❓ Why did the model predict
+  </text>
+  <text x="400" y="95" font-size="16" font-weight="bold" text-anchor="middle" fill="#e74c3c">
+    this edge exists?
+  </text>
+  
+  <!-- Pipeline Flow -->
+  <text x="50" y="150" font-size="14" font-weight="bold" fill="#34495e">Model Pipeline:</text>
+  
+  <!-- Step 1: Input Graph -->
+  <rect x="50" y="170" width="140" height="100" fill="#3498db" opacity="0.2" stroke="#3498db" stroke-width="2" rx="5"/>
+  <text x="120" y="195" font-size="14" font-weight="bold" text-anchor="middle" fill="#2c3e50">Input Graph</text>
+  <!-- Simple graph visualization -->
+  <circle cx="90" cy="230" r="8" fill="#3498db"/>
+  <circle cx="150" cy="230" r="8" fill="#3498db"/>
+  <circle cx="120" cy="250" r="8" fill="#3498db"/>
+  <line x1="90" y1="230" x2="150" y2="230" stroke="#3498db" stroke-width="2"/>
+  <line x1="90" y1="230" x2="120" y2="250" stroke="#3498db" stroke-width="2"/>
+  <line x1="150" y1="230" x2="120" y2="250" stroke="#3498db" stroke-width="2"/>
+  
+  <!-- Arrow 1 -->
+  <path d="M 195 220 L 235 220" stroke="#34495e" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="215" y="215" font-size="11" text-anchor="middle" fill="#7f8c8d">random walks</text>
+  
+  <!-- Step 2: node2vec -->
+  <rect x="240" y="170" width="140" height="100" fill="#9b59b6" opacity="0.2" stroke="#9b59b6" stroke-width="2" rx="5"/>
+  <text x="310" y="195" font-size="14" font-weight="bold" text-anchor="middle" fill="#2c3e50">node2vec</text>
+  <text x="310" y="215" font-size="11" text-anchor="middle" fill="#555">Training</text>
+  <rect x="260" y="225" width="100" height="8" fill="#9b59b6" opacity="0.3" rx="2"/>
+  <rect x="260" y="238" width="80" height="8" fill="#9b59b6" opacity="0.3" rx="2"/>
+  <rect x="260" y="251" width="90" height="8" fill="#9b59b6" opacity="0.3" rx="2"/>
+  
+  <!-- Arrow 2 -->
+  <path d="M 385 220 L 425 220" stroke="#34495e" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="405" y="215" font-size="11" text-anchor="middle" fill="#7f8c8d">embeddings</text>
+  
+  <!-- Step 3: Embeddings -->
+  <rect x="430" y="170" width="140" height="100" fill="#f39c12" opacity="0.2" stroke="#f39c12" stroke-width="2" rx="5"/>
+  <text x="500" y="195" font-size="14" font-weight="bold" text-anchor="middle" fill="#2c3e50">Node Embeddings</text>
+  <text x="500" y="220" font-size="10" text-anchor="middle" fill="#555">Node A: [0.2, -0.5, ...]</text>
+  <text x="500" y="235" font-size="10" text-anchor="middle" fill="#555">Node B: [0.8, 0.3, ...]</text>
+  <text x="500" y="255" font-size="10" text-anchor="middle" fill="#555">Features for pair (A,B)</text>
+  
+  <!-- Arrow 3 -->
+  <path d="M 575 220 L 615 220" stroke="#34495e" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="595" y="215" font-size="11" text-anchor="middle" fill="#7f8c8d">features</text>
+  
+  <!-- Step 4: XGBoost -->
+  <rect x="620" y="170" width="140" height="100" fill="#27ae60" opacity="0.2" stroke="#27ae60" stroke-width="2" rx="5"/>
+  <text x="690" y="195" font-size="14" font-weight="bold" text-anchor="middle" fill="#2c3e50">XGBoost</text>
+  <text x="690" y="215" font-size="11" text-anchor="middle" fill="#555">Link Prediction</text>
+  <!-- Tree icon -->
+  <circle cx="690" cy="235" r="5" fill="#27ae60"/>
+  <line x1="690" y1="240" x2="675" y2="255" stroke="#27ae60" stroke-width="2"/>
+  <line x1="690" y1="240" x2="705" y2="255" stroke="#27ae60" stroke-width="2"/>
+  <circle cx="675" cy="255" r="3" fill="#27ae60"/>
+  <circle cx="705" cy="255" r="3" fill="#27ae60"/>
+  
+  <!-- Prediction Result -->
+  <rect x="250" y="300" width="300" height="50" fill="#27ae60" opacity="0.1" stroke="#27ae60" stroke-width="2" rx="5"/>
+  <text x="400" y="325" font-size="14" font-weight="bold" text-anchor="middle" fill="#27ae60">
+    Prediction: Edge (A, B) likely exists ✓
+  </text>
+  <text x="400" y="342" font-size="11" text-anchor="middle" fill="#555">
+    Confidence: 0.87
+  </text>
+  
+  <!-- The Gap/Problem -->
+  <rect x="100" y="380" width="600" height="80" fill="#e74c3c" opacity="0.05" stroke="#e74c3c" stroke-width="2" stroke-dasharray="5,5" rx="5"/>
+  <text x="400" y="405" font-size="15" font-weight="bold" text-anchor="middle" fill="#e74c3c">
+    ❌ INTERPRETABILITY GAP
+  </text>
+  <text x="400" y="425" font-size="12" text-anchor="middle" fill="#555">
+    Which training examples (edges, walks, node pairs) in the original graph
+  </text>
+  <text x="400" y="443" font-size="12" text-anchor="middle" fill="#555">
+    most influenced this prediction? Why these nodes? Why this confidence?
+  </text>
+  
+  <!-- Solution with TracIn -->
+  <rect x="100" y="480" width="600" height="90" fill="#2ecc71" opacity="0.1" stroke="#2ecc71" stroke-width="2" rx="5"/>
+  <text x="400" y="505" font-size="15" font-weight="bold" text-anchor="middle" fill="#2ecc71">
+    ✓ SOLUTION: Influence Tracing (TracIn-like methods)
+  </text>
+  <text x="400" y="527" font-size="12" text-anchor="middle" fill="#555">
+    Trace gradient flow from prediction → embeddings → training data
+  </text>
+  <text x="400" y="545" font-size="12" text-anchor="middle" fill="#555">
+    Identify: "This edge was predicted because nodes A and B appeared
+  </text>
+  <text x="400" y="560" font-size="12" text-anchor="middle" fill="#555">
+    together in walk X, Y, Z during node2vec training"
+  </text>
+  
+  <!-- Arrow marker definition -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#34495e"/>
+    </marker>
+  </defs>
+  
+  <!-- Back arrow showing influence tracing -->
+  <path d="M 400 475 L 400 360" stroke="#2ecc71" stroke-width="3" fill="none" marker-end="url(#arrowhead2)" stroke-dasharray="8,4"/>
+  <text x="420" y="420" font-size="11" font-weight="bold" fill="#2ecc71">Trace back</text>
+  <text x="420" y="433" font-size="11" font-weight="bold" fill="#2ecc71">influence</text>
+  
+  <defs>
+    <marker id="arrowhead2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2ecc71"/>
+    </marker>
+  </defs>
+</svg>

@@ -142,6 +142,14 @@ def categorize_treats_edges(
 ) -> Tuple[List[Tuple[str, str, str]], Dict[str, List[Tuple[str, str, str]]], Dict[str, List[Tuple[str, str, str]]], List[Tuple[str, str, str]]]:
     """Categorize treats edges into 1-1, 1-N, N-1, and N-M patterns.
 
+    NEW APPROACH (No Node Overlap):
+    1. First identify N-to-M edges (both subject and object count > 1)
+    2. Extract ALL nodes involved in N-to-M edges
+    3. Collect ALL edges involving these N-to-M nodes into the N-to-M bin
+    4. Categorize remaining edges into 1-to-1, 1-to-N, N-to-1
+
+    This ensures NO node overlap between bins.
+
     Args:
         treats_edges: List of treats edges
         subject_counts: Counter of subject occurrences
@@ -151,14 +159,55 @@ def categorize_treats_edges(
         Tuple of (one_to_one_edges, one_to_n_groups, n_to_one_groups, many_to_many_edges)
         Groups are dicts mapping entity -> list of edges
     """
-    logger.info("Categorizing treats edges by multiplicity...")
+    logger.info("=" * 80)
+    logger.info("Categorizing treats edges by multiplicity (N-to-M first approach)...")
+    logger.info("=" * 80)
 
-    one_to_one = []
-    one_to_n_groups = defaultdict(list)  # subject -> list of edges (subj appears >1, obj appears 1)
-    n_to_one_groups = defaultdict(list)  # object -> list of edges (obj appears >1, subj appears 1)
-    many_to_many = []  # Both subject and object appear multiple times (N-M pattern)
+    # STEP 1: Identify core N-to-M edges (both subject and object count > 1)
+    logger.info("STEP 1: Identifying core N-to-M edges...")
+    core_nm_edges = [
+        (s, p, o) for s, p, o in treats_edges
+        if subject_counts[s] > 1 and object_counts[o] > 1
+    ]
+    logger.info(f"  Found {len(core_nm_edges)} core N-to-M edges (both nodes have count > 1)")
+
+    # STEP 2: Extract ALL nodes involved in N-to-M edges
+    logger.info("STEP 2: Extracting all nodes involved in N-to-M edges...")
+    nm_nodes = set()
+    for subject, predicate, obj in core_nm_edges:
+        nm_nodes.add(subject)
+        nm_nodes.add(obj)
+
+    nm_subjects = {s for s, p, o in core_nm_edges}
+    nm_objects = {o for s, p, o in core_nm_edges}
+
+    logger.info(f"  N-to-M subjects: {len(nm_subjects)}")
+    logger.info(f"  N-to-M objects: {len(nm_objects)}")
+    logger.info(f"  Total N-to-M nodes: {len(nm_nodes)}")
+
+    # STEP 3: Collect ALL edges involving N-to-M nodes (this is the complete N-to-M bin)
+    logger.info("STEP 3: Collecting ALL edges involving N-to-M nodes...")
+    many_to_many = []
+    nm_edge_set = set()
 
     for edge in treats_edges:
+        subject, predicate, obj = edge
+        if subject in nm_nodes or obj in nm_nodes:
+            many_to_many.append(edge)
+            nm_edge_set.add(edge)
+
+    logger.info(f"  Total N-to-M bin edges: {len(many_to_many)} ({len(many_to_many)/len(treats_edges)*100:.2f}%)")
+    logger.info(f"  Expanded from {len(core_nm_edges)} core edges by {len(many_to_many) - len(core_nm_edges)} edges")
+
+    # STEP 4: Categorize remaining edges (those NOT in N-to-M bin)
+    logger.info("STEP 4: Categorizing remaining edges into 1-to-1, 1-to-N, N-to-1...")
+    remaining_edges = [edge for edge in treats_edges if edge not in nm_edge_set]
+
+    one_to_one = []
+    one_to_n_groups = defaultdict(list)  # subject -> list of edges
+    n_to_one_groups = defaultdict(list)  # object -> list of edges
+
+    for edge in remaining_edges:
         subject, predicate, obj = edge
         subj_count = subject_counts[subject]
         obj_count = object_counts[obj]
@@ -173,15 +222,61 @@ def categorize_treats_edges(
             # 1-to-N pattern (same subject to multiple objects)
             one_to_n_groups[subject].append(edge)
         else:
-            # Both subject and object appear multiple times (N-to-M pattern)
-            # These are complex edges that shouldn't be split across train/test
-            many_to_many.append(edge)
+            # This should not happen - both counts > 1 means it should be in N-to-M
+            logger.warning(f"  Unexpected edge not in N-to-M bin: {edge} (subj_count={subj_count}, obj_count={obj_count})")
 
-    logger.info(f"Categorization results:")
+    logger.info("\n" + "=" * 80)
+    logger.info("Categorization results:")
+    logger.info("=" * 80)
     logger.info(f"  1-to-1 edges: {len(one_to_one)} ({len(one_to_one)/len(treats_edges)*100:.2f}%)")
-    logger.info(f"  1-to-N groups: {len(one_to_n_groups)} subjects with total {sum(len(edges) for edges in one_to_n_groups.values())} edges ({sum(len(edges) for edges in one_to_n_groups.values())/len(treats_edges)*100:.2f}%)")
-    logger.info(f"  N-to-1 groups: {len(n_to_one_groups)} objects with total {sum(len(edges) for edges in n_to_one_groups.values())} edges ({sum(len(edges) for edges in n_to_one_groups.values())/len(treats_edges)*100:.2f}%)")
+    logger.info(f"  1-to-N groups: {len(one_to_n_groups)} subjects with {sum(len(edges) for edges in one_to_n_groups.values())} edges ({sum(len(edges) for edges in one_to_n_groups.values())/len(treats_edges)*100:.2f}%)")
+    logger.info(f"  N-to-1 groups: {len(n_to_one_groups)} objects with {sum(len(edges) for edges in n_to_one_groups.values())} edges ({sum(len(edges) for edges in n_to_one_groups.values())/len(treats_edges)*100:.2f}%)")
     logger.info(f"  N-to-M edges: {len(many_to_many)} ({len(many_to_many)/len(treats_edges)*100:.2f}%)")
+    logger.info("=" * 80)
+
+    # STEP 5: Verify no node overlap between bins
+    logger.info("STEP 5: Verifying no node overlap between bins...")
+
+    nodes_1to1 = set()
+    for s, p, o in one_to_one:
+        nodes_1to1.add(s)
+        nodes_1to1.add(o)
+
+    nodes_1toN = set()
+    for edges in one_to_n_groups.values():
+        for s, p, o in edges:
+            nodes_1toN.add(s)
+            nodes_1toN.add(o)
+
+    nodes_Nto1 = set()
+    for edges in n_to_one_groups.values():
+        for s, p, o in edges:
+            nodes_Nto1.add(s)
+            nodes_Nto1.add(o)
+
+    # Check overlaps
+    overlap_1to1_NtoM = nodes_1to1 & nm_nodes
+    overlap_1toN_NtoM = nodes_1toN & nm_nodes
+    overlap_Nto1_NtoM = nodes_Nto1 & nm_nodes
+    overlap_1to1_1toN = nodes_1to1 & nodes_1toN
+    overlap_1to1_Nto1 = nodes_1to1 & nodes_Nto1
+    overlap_1toN_Nto1 = nodes_1toN & nodes_Nto1
+
+    total_overlaps = (len(overlap_1to1_NtoM) + len(overlap_1toN_NtoM) + len(overlap_Nto1_NtoM) +
+                     len(overlap_1to1_1toN) + len(overlap_1to1_Nto1) + len(overlap_1toN_Nto1))
+
+    if total_overlaps == 0:
+        logger.info("  ✓ SUCCESS: No node overlap detected between any bins!")
+    else:
+        logger.error(f"  ✗ FAILURE: Found {total_overlaps} node overlaps:")
+        if overlap_1to1_NtoM: logger.error(f"    1-to-1 ∩ N-to-M: {len(overlap_1to1_NtoM)} nodes")
+        if overlap_1toN_NtoM: logger.error(f"    1-to-N ∩ N-to-M: {len(overlap_1toN_NtoM)} nodes")
+        if overlap_Nto1_NtoM: logger.error(f"    N-to-1 ∩ N-to-M: {len(overlap_Nto1_NtoM)} nodes")
+        if overlap_1to1_1toN: logger.error(f"    1-to-1 ∩ 1-to-N: {len(overlap_1to1_1toN)} nodes")
+        if overlap_1to1_Nto1: logger.error(f"    1-to-1 ∩ N-to-1: {len(overlap_1to1_Nto1)} nodes")
+        if overlap_1toN_Nto1: logger.error(f"    1-to-N ∩ N-to-1: {len(overlap_1toN_Nto1)} nodes")
+
+    logger.info("=" * 80)
 
     # Log warning if categories are imbalanced
     if len(one_to_one) < len(treats_edges) * 0.05:
@@ -204,21 +299,26 @@ def sample_test_edges(
 ) -> Tuple[List[Tuple[str, str, str]], List[Tuple[str, str, str]]]:
     """Sample test edges using stratified sampling with leakage prevention.
 
-    This function prevents data leakage by ensuring that edges sharing the same
-    subject or object in the treats relationship are kept together in the same
-    split (either all in test or all in train).
+    NEW APPROACH: The categorization now ensures NO node overlap between bins.
+    N-to-M edges are identified first, and ALL edges involving N-to-M nodes
+    are placed in the N-to-M bin. This guarantees that no node appears in
+    multiple bins, completely preventing data leakage.
 
     Leakage Prevention Strategy:
-    - 1-to-1: Safe to sample individually (by definition, no shared entities)
-    - 1-to-N: Sample by subject - when a subject is selected, ALL its edges go to test
-    - N-to-1: Sample by object - when an object is selected, ALL its edges go to test
-    - N-to-M: Sample by subject - when a subject is selected, ALL its edges go to test
+    - 1-to-1: Safe to sample individually (no shared entities with other bins)
+    - 1-to-N: Sample by subject - ALL edges for a subject go together (no overlap with N-to-M)
+    - N-to-1: Sample by object - ALL edges for an object go together (no overlap with N-to-M)
+    - N-to-M: Sample by subject - ALL edges for a subject go together (exhaustive bin)
+
+    Key Guarantee: After categorization, bins are mutually exclusive by nodes.
+    A node cannot appear in more than one bin, so sampling from different bins
+    cannot create leakage.
 
     Args:
-        one_to_one: List of 1-to-1 edges
-        one_to_n_groups: Dict mapping subject -> list of 1-to-N edges
-        n_to_one_groups: Dict mapping object -> list of N-to-1 edges
-        many_to_many: List of N-to-M edges
+        one_to_one: List of 1-to-1 edges (both nodes appear only once, not in any other bin)
+        one_to_n_groups: Dict mapping subject -> list of 1-to-N edges (nodes not in N-to-M bin)
+        n_to_one_groups: Dict mapping object -> list of N-to-1 edges (nodes not in N-to-M bin)
+        many_to_many: List of N-to-M edges (includes ALL edges with N-to-M nodes)
         total_treats: Total number of treats edges
         one_to_one_pct: Target percentage for 1-to-1 edges (default: 6%)
         one_to_n_pct: Target percentage for 1-to-N edges (default: 2%)
