@@ -638,9 +638,11 @@ def main():
         # Write output files
         test_output = os.path.join(output_dir, 'test.txt')
         train_candidates_output = os.path.join(output_dir, 'train_candidates.txt')
+        treat_output = os.path.join(output_dir, 'treat.txt')
 
         write_edges(test_edges, test_output)
         write_edges(train_candidates, train_candidates_output)
+        write_edges(treats_edges, treat_output)
 
         # Save statistics
         stats = {
@@ -682,6 +684,7 @@ def main():
         logger.info("Test edge extraction complete!")
         logger.info(f"  Test edges: {test_output} ({len(test_edges)} edges)")
         logger.info(f"  Train candidates: {train_candidates_output} ({len(train_candidates)} edges)")
+        logger.info(f"  All treats edges: {treat_output} ({len(treats_edges)} edges)")
         logger.info(f"  Statistics: {stats_output}")
         logger.info("=" * 80)
 
