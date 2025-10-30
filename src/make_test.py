@@ -632,6 +632,14 @@ def main():
             args.seed
         )
 
+        # Deduplicate treats edges
+        logger.info(f"Deduplicating treats edges (original count: {len(treats_edges)})")
+        unique_treats_edges = list(set(treats_edges))
+        deduplicated_count = len(treats_edges) - len(unique_treats_edges)
+        if deduplicated_count > 0:
+            logger.info(f"Removed {deduplicated_count} duplicate treat edges")
+        logger.info(f"Unique treats edges: {len(unique_treats_edges)}")
+
         # Combine remaining treats with non-treats edges for train candidates
         train_candidates = remaining_treats + non_treats_edges
 
@@ -642,12 +650,14 @@ def main():
 
         write_edges(test_edges, test_output)
         write_edges(train_candidates, train_candidates_output)
-        write_edges(treats_edges, treat_output)
+        write_edges(unique_treats_edges, treat_output)
 
         # Save statistics
         stats = {
             'total_edges': len(treats_edges) + len(non_treats_edges),
             'treats_edges': len(treats_edges),
+            'treats_edges_unique': len(unique_treats_edges),
+            'treats_edges_duplicates': deduplicated_count,
             'non_treats_edges': len(non_treats_edges),
             'test_edges': len(test_edges),
             'test_percentage': len(test_edges) / len(treats_edges) * 100,
@@ -684,7 +694,7 @@ def main():
         logger.info("Test edge extraction complete!")
         logger.info(f"  Test edges: {test_output} ({len(test_edges)} edges)")
         logger.info(f"  Train candidates: {train_candidates_output} ({len(train_candidates)} edges)")
-        logger.info(f"  All treats edges: {treat_output} ({len(treats_edges)} edges)")
+        logger.info(f"  All treats edges (deduplicated): {treat_output} ({len(unique_treats_edges)} edges, {deduplicated_count} duplicates removed)")
         logger.info(f"  Statistics: {stats_output}")
         logger.info("=" * 80)
 
