@@ -163,6 +163,8 @@ def add_column_to_tsv(input_tsv: str, csv_pairs: set, output_tsv: str,
 def filter_tsv_matches_only(input_tsv_with_column: str, output_filtered_tsv: str) -> int:
     """Create a filtered TSV containing only rows where the pair exists in both files.
 
+    Output contains only the first 3 columns (Drug, Predicate, Disease) without the InCSV column.
+
     Args:
         input_tsv_with_column: Path to TSV file that already has the existence column
         output_filtered_tsv: Path to output filtered TSV file
@@ -176,9 +178,11 @@ def filter_tsv_matches_only(input_tsv_with_column: str, output_filtered_tsv: str
         for line in f_in:
             line = line.strip()
 
-            # Always write header
+            # Write header (only first 3 columns)
             if line.startswith('Drug'):
-                f_out.write(f"{line}\n")
+                parts = line.split('\t')
+                header = '\t'.join(parts[:3])
+                f_out.write(f"{header}\n")
                 continue
 
             if not line:
@@ -190,10 +194,12 @@ def filter_tsv_matches_only(input_tsv_with_column: str, output_filtered_tsv: str
 
             # Check if the last column (existence indicator) is 1
             if parts[-1] == '1':
-                f_out.write(f"{line}\n")
+                # Only write first 3 columns (Drug, Predicate, Disease)
+                output_line = '\t'.join(parts[:3])
+                f_out.write(f"{output_line}\n")
                 filtered_count += 1
 
-    print(f"Filtered TSV: {filtered_count} rows with matching pairs")
+    print(f"Filtered TSV: {filtered_count} rows with matching pairs (first 3 columns only)")
     return filtered_count
 
 
