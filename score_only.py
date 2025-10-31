@@ -270,9 +270,38 @@ def main():
             output_channels = state_dict['interaction.hr1d.0.weight'].shape[0]
             logger.info(f"  ✓ Inferred output_channels={output_channels} from interaction.hr1d.0.weight")
 
-        # Try to infer embedding_height and embedding_width
-        # Common configurations for different embedding dimensions
-        if embedding_dim:
+        # Try to infer embedding_height and embedding_width from hr1d layer size
+        # The hr1d.0.weight has shape [output_dim, input_size]
+        # input_size = (h - kernel_h + 1) * (w - kernel_w + 1) * output_channels
+        if 'interaction.hr1d.0.weight' in state_dict and embedding_dim and output_channels:
+            hr1d_input_size = state_dict['interaction.hr1d.0.weight'].shape[1]
+            logger.info(f"  hr1d input size: {hr1d_input_size}")
+
+            # Assuming kernel size 3x3 (default in ConvE)
+            kernel_h, kernel_w = 3, 3
+            # hr1d_input_size = (h - 2) * (w - 2) * output_channels
+            conv_output_size = hr1d_input_size // output_channels
+            logger.info(f"  Convolution output size (h-2)*(w-2): {conv_output_size}")
+
+            # Try to find h, w such that h*w = embedding_dim and (h-2)*(w-2) = conv_output_size
+            for h in range(3, 100):  # h must be at least 3 for kernel 3x3
+                if embedding_dim % h == 0:
+                    w = embedding_dim // h
+                    if (h - 2) * (w - 2) == conv_output_size:
+                        embedding_height = h
+                        embedding_width = w
+                        logger.info(f"  ✓ Inferred embedding_height={h}, embedding_width={w}")
+                        logger.info(f"    Verification: {h}*{w}={h*w} (embedding_dim={embedding_dim})")
+                        logger.info(f"    Verification: ({h}-2)*({w}-2)={conv_output_size}")
+                        break
+
+            if embedding_height is None:
+                logger.warning(f"Could not infer embedding dimensions from hr1d size")
+                logger.warning(f"  Need: h*w={embedding_dim} and (h-2)*(w-2)={conv_output_size}")
+
+        # Fallback: try common configurations
+        if embedding_height is None and embedding_dim:
+            logger.info("  Using fallback common configurations...")
             common_configs = [
                 (10, 20),  # Common for embedding_dim=200
                 (20, 10),  # Alternative for embedding_dim=200
@@ -285,7 +314,7 @@ def main():
                 if h * w == embedding_dim:
                     embedding_height = h
                     embedding_width = w
-                    logger.info(f"  ✓ Inferred embedding_height={h}, embedding_width={w}")
+                    logger.info(f"  ✓ Using fallback: embedding_height={h}, embedding_width={w}")
                     break
 
     # Validate that we have the required parameters
