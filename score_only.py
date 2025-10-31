@@ -356,9 +356,62 @@ def main():
     )
 
     # Load state dict into model
-    model.load_state_dict(state_dict)
-    model.eval()
-    logger.info(f"Model loaded successfully")
+    try:
+        model.load_state_dict(state_dict)
+        model.eval()
+        logger.info(f"Model loaded successfully")
+    except RuntimeError as e:
+        logger.error(f"Failed to load state_dict with current configuration: {e}")
+        logger.info("Trying to find correct embedding_height and embedding_width by testing configurations...")
+
+        # Extract the expected size from the error message
+        import re
+        match = re.search(r'copying a param with shape torch\.Size\(\[(\d+), (\d+)\]\)', str(e))
+        if match:
+            expected_hr1d_out = int(match.group(1))
+            expected_hr1d_in = int(match.group(2))
+            logger.info(f"  Checkpoint expects hr1d input size: {expected_hr1d_in}")
+
+            # Calculate what conv output size this corresponds to
+            # hr1d_input = conv_output * output_channels
+            expected_conv_out = expected_hr1d_in // output_channels
+            logger.info(f"  Expected conv output size: {expected_conv_out}")
+
+            # Try all possible h, w combinations for this embedding_dim
+            found = False
+            for h in range(3, 100):
+                if embedding_dim % h == 0:
+                    w = embedding_dim // h
+                    # Test this configuration
+                    test_kwargs = {
+                        'embedding_dim': embedding_dim,
+                        'output_channels': output_channels,
+                        'embedding_height': h,
+                        'embedding_width': w,
+                    }
+
+                    test_model = ConvE(triples_factory=test_triples, **test_kwargs)
+
+                    # Check if the hr1d layer size matches
+                    if 'interaction.hr1d.0.weight' in test_model.state_dict():
+                        test_hr1d_size = test_model.state_dict()['interaction.hr1d.0.weight'].shape[1]
+                        if test_hr1d_size == expected_hr1d_in:
+                            logger.info(f"  ✓ Found matching configuration: h={h}, w={w}")
+                            logger.info(f"    hr1d input size: {test_hr1d_size}")
+
+                            # Use this configuration
+                            model = test_model
+                            model.load_state_dict(state_dict)
+                            model.eval()
+                            found = True
+                            break
+
+            if not found:
+                logger.error("Could not find matching embedding configuration")
+                return
+        else:
+            logger.error("Could not parse error message to find expected sizes")
+            return
 
     # Create evaluator
     evaluator = DetailedEvaluator(
