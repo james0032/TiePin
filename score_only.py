@@ -106,6 +106,12 @@ def main():
         action='store_true',
         help='Apply sigmoid to convert scores to probabilities [0, 1] (default: False, returns raw logits)'
     )
+    parser.add_argument(
+        '--top-n',
+        type=int,
+        default=None,
+        help='Output top N highest scoring triples to a separate TSV file (format: head\\tpredicate\\ttail, no header)'
+    )
 
     args = parser.parse_args()
 
@@ -485,12 +491,27 @@ def main():
     with open(ranked_json_path, 'w') as f:
         json.dump(ranked_results, f, indent=2)
 
+    # Create top N TSV file if requested
+    top_n_path = None
+    if args.top_n is not None:
+        top_n_path = args.output.replace('.json', f'_top{args.top_n}.txt')
+        top_n_df = df_ranked.head(args.top_n)
+
+        # Write in TSV format: head_label, relation_label, tail_label (no header)
+        with open(top_n_path, 'w') as f:
+            for _, row in top_n_df.iterrows():
+                f.write(f"{row['head_label']}\t{row['relation_label']}\t{row['tail_label']}\n")
+
+        logger.info(f"✓ Top {args.top_n} triples saved to: {top_n_path}")
+
     logger.info(f"✓ Done! Scored {len(results)} triples")
     logger.info(f"✓ Results saved to:")
     logger.info(f"  - Original order JSON: {args.output}")
     logger.info(f"  - Original order CSV: {csv_path}")
     logger.info(f"  - Ranked by score JSON: {ranked_json_path}")
     logger.info(f"  - Ranked by score CSV: {ranked_csv_path}")
+    if top_n_path:
+        logger.info(f"  - Top {args.top_n} TSV (no header): {top_n_path}")
 
     # Show some example scores from original order
     logger.info("\nExample scores (first 5 triples in original order):")
