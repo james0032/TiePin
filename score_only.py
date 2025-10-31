@@ -193,6 +193,11 @@ def main():
     # Load the model checkpoint
     checkpoint = torch.load(model_file, map_location='cpu')
 
+    # Debug: what type is the checkpoint?
+    logger.info(f"Checkpoint type: {type(checkpoint)}")
+    if isinstance(checkpoint, dict):
+        logger.info(f"Checkpoint top-level keys: {list(checkpoint.keys())[:20]}")
+
     # Determine if this is a state_dict only or a full checkpoint
     state_dict = None
     embedding_dim = None
@@ -212,12 +217,14 @@ def main():
     elif isinstance(checkpoint, dict):
         # Just a state_dict - infer parameters from tensor shapes
         state_dict = checkpoint
+        logger.info("=" * 80)
         logger.info("Loaded state dict without config - inferring parameters from tensor shapes...")
+        logger.info("=" * 80)
 
-        # Debug: print all keys to see what we're working with
+        # Debug: print ALL keys to see what we're working with
         logger.info(f"Total keys in checkpoint: {len(state_dict)}")
-        logger.info("Sample keys:")
-        for i, key in enumerate(list(state_dict.keys())[:20]):
+        logger.info("All checkpoint keys:")
+        for key in sorted(state_dict.keys()):
             logger.info(f"  {key}: {state_dict[key].shape}")
 
         # Try different possible key names for entity embeddings
