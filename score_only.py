@@ -214,36 +214,58 @@ def main():
         state_dict = checkpoint
         logger.info("Loaded state dict without config - inferring parameters from tensor shapes...")
 
-        # Infer embedding_dim from entity embeddings
-        # PyKEEN ConvE stores entity embeddings at 'entity_representations.0._embeddings.weight'
-        if 'entity_representations.0._embeddings.weight' in state_dict:
-            embedding_dim = state_dict['entity_representations.0._embeddings.weight'].shape[1]
-            logger.info(f"  Inferred embedding_dim={embedding_dim} from entity embeddings")
+        # Debug: print all keys to see what we're working with
+        logger.info(f"Total keys in checkpoint: {len(state_dict)}")
+        logger.info("Sample keys:")
+        for i, key in enumerate(list(state_dict.keys())[:20]):
+            logger.info(f"  {key}: {state_dict[key].shape}")
 
-        # Infer output_channels from the first linear layer after convolution
-        # The hr1d layer has shape [output_channels, ...] after convolution
-        if 'interaction.hr1d.0.weight' in state_dict:
+        # Try different possible key names for entity embeddings
+        entity_embedding_keys = [
+            'entity_representations.0._embeddings.weight',
+            'entity_embeddings.weight',
+            'entity_embedding.weight',
+        ]
+
+        for key in entity_embedding_keys:
+            if key in state_dict:
+                embedding_dim = state_dict[key].shape[1]
+                logger.info(f"  ✓ Inferred embedding_dim={embedding_dim} from {key}")
+                break
+
+        # If still not found, search for any key containing 'entity' and 'embedding'
+        if embedding_dim is None:
+            for key in state_dict.keys():
+                if 'entity' in key.lower() and 'embedding' in key.lower() and 'weight' in key:
+                    embedding_dim = state_dict[key].shape[1]
+                    logger.info(f"  ✓ Inferred embedding_dim={embedding_dim} from {key}")
+                    break
+
+        # Infer output_channels from convolution layer
+        # Check hr2d.2.weight which has shape [output_channels, 1, kernel_h, kernel_w]
+        if 'interaction.hr2d.2.weight' in state_dict:
+            output_channels = state_dict['interaction.hr2d.2.weight'].shape[0]
+            logger.info(f"  ✓ Inferred output_channels={output_channels} from interaction.hr2d.2.weight")
+        elif 'interaction.hr1d.0.weight' in state_dict:
             output_channels = state_dict['interaction.hr1d.0.weight'].shape[0]
-            logger.info(f"  Inferred output_channels={output_channels} from hr1d layer")
+            logger.info(f"  ✓ Inferred output_channels={output_channels} from interaction.hr1d.0.weight")
 
         # Try to infer embedding_height and embedding_width
-        # The input to hr1d.0 has shape [output_channels, height*width*output_channels]
-        if 'interaction.hr1d.0.weight' in state_dict and embedding_dim:
-            hr1d_input_size = state_dict['interaction.hr1d.0.weight'].shape[1]
-            # hr1d_input_size = (embedding_height - kernel_height + 1) * (embedding_width - kernel_width + 1) * output_channels
-            # We need to solve for height and width, but we need kernel size
-            # Let's try common configurations
-            # For embedding_dim and typical kernel size 3x3:
+        # Common configurations for different embedding dimensions
+        if embedding_dim:
             common_configs = [
                 (10, 20),  # Common for embedding_dim=200
+                (20, 10),  # Alternative for embedding_dim=200
                 (8, 4),    # Common for embedding_dim=32
                 (4, 8),    # Alternative for embedding_dim=32
+                (16, 16),  # For embedding_dim=256
+                (14, 14),  # For embedding_dim=196
             ]
             for h, w in common_configs:
                 if h * w == embedding_dim:
                     embedding_height = h
                     embedding_width = w
-                    logger.info(f"  Inferred embedding_height={h}, embedding_width={w}")
+                    logger.info(f"  ✓ Inferred embedding_height={h}, embedding_width={w}")
                     break
     else:
         logger.error(f"Unknown checkpoint format")
