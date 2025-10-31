@@ -447,6 +447,11 @@ def main():
 
     # Save results with entity names
     logger.info(f"Saving results to {args.output}...")
+
+    # Create output directory if it doesn't exist
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     with open(args.output, 'w') as f:
         json.dump(results, f, indent=2)
 
