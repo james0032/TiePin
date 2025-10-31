@@ -208,22 +208,35 @@ def main():
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         # Full checkpoint with metadata
         state_dict = checkpoint['model_state_dict']
+        logger.info(f"Extracted model_state_dict with {len(state_dict)} keys")
+
+        # Try to get config if it exists
         config = checkpoint.get('config', {})
-        embedding_dim = config.get('embedding_dim', None)
-        output_channels = config.get('output_channels', None)
-        embedding_height = config.get('embedding_height', None)
-        embedding_width = config.get('embedding_width', None)
-        logger.info(f"Loaded checkpoint with config: embedding_dim={embedding_dim}, output_channels={output_channels}")
+        if config:
+            embedding_dim = config.get('embedding_dim', None)
+            output_channels = config.get('output_channels', None)
+            embedding_height = config.get('embedding_height', None)
+            embedding_width = config.get('embedding_width', None)
+            logger.info(f"Loaded checkpoint with config: embedding_dim={embedding_dim}, output_channels={output_channels}")
+        else:
+            logger.info("No config found in checkpoint, will infer from state_dict...")
     elif isinstance(checkpoint, dict):
         # Just a state_dict - infer parameters from tensor shapes
         state_dict = checkpoint
+        logger.info("Checkpoint is a plain state_dict")
+    else:
+        logger.error(f"Unknown checkpoint format")
+        return
+
+    # If we don't have model parameters yet, infer them from state_dict
+    if embedding_dim is None or output_channels is None:
         logger.info("=" * 80)
-        logger.info("Loaded state dict without config - inferring parameters from tensor shapes...")
+        logger.info("Inferring model parameters from state_dict...")
         logger.info("=" * 80)
 
         # Debug: print ALL keys to see what we're working with
-        logger.info(f"Total keys in checkpoint: {len(state_dict)}")
-        logger.info("All checkpoint keys:")
+        logger.info(f"Total keys in state_dict: {len(state_dict)}")
+        logger.info("All state_dict keys:")
         for key in sorted(state_dict.keys()):
             logger.info(f"  {key}: {state_dict[key].shape}")
 
@@ -274,9 +287,6 @@ def main():
                     embedding_width = w
                     logger.info(f"  ✓ Inferred embedding_height={h}, embedding_width={w}")
                     break
-    else:
-        logger.error(f"Unknown checkpoint format")
-        return
 
     # Validate that we have the required parameters
     if embedding_dim is None or output_channels is None:
