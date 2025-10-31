@@ -147,24 +147,111 @@ def run_tracin_analysis(
     logger.info(f"Loading model from {model_path}...")
     checkpoint = torch.load(model_path, map_location='cpu')
 
+    # Extract state_dict and try to get config
+    state_dict = None
+    embedding_height = None
+    embedding_width = None
+
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         state_dict = checkpoint['model_state_dict']
-        embedding_dim = checkpoint.get('config', {}).get('embedding_dim', embedding_dim)
-        output_channels = checkpoint.get('config', {}).get('output_channels', output_channels)
+        logger.info(f"Extracted model_state_dict with {len(state_dict)} keys")
+
+        config = checkpoint.get('config', {})
+        if config:
+            embedding_dim = config.get('embedding_dim', embedding_dim)
+            output_channels = config.get('output_channels', output_channels)
+            embedding_height = config.get('embedding_height', None)
+            embedding_width = config.get('embedding_width', None)
+            logger.info(f"Loaded config: embedding_dim={embedding_dim}, output_channels={output_channels}")
+        else:
+            logger.info("No config in checkpoint, will infer parameters...")
     elif isinstance(checkpoint, dict):
         state_dict = checkpoint
+        logger.info("Checkpoint is a plain state_dict")
     else:
         logger.error("Unknown checkpoint format")
         return
 
+    # Infer parameters from state_dict if not set
+    if embedding_dim == 200 or output_channels == 32:  # Default values suggest we need to infer
+        logger.info("Inferring model parameters from state_dict...")
+
+        # Infer embedding_dim from entity embeddings
+        if 'entity_representations.0._embeddings.weight' in state_dict:
+            inferred_dim = state_dict['entity_representations.0._embeddings.weight'].shape[1]
+            logger.info(f"  Inferred embedding_dim={inferred_dim} from entity embeddings")
+            embedding_dim = inferred_dim
+
+        # Infer output_channels from convolution layer
+        if 'interaction.hr2d.2.weight' in state_dict:
+            inferred_channels = state_dict['interaction.hr2d.2.weight'].shape[0]
+            logger.info(f"  Inferred output_channels={inferred_channels} from conv layer")
+            output_channels = inferred_channels
+
+    # Create model with inferred parameters
+    model_kwargs = {
+        'embedding_dim': embedding_dim,
+        'output_channels': output_channels,
+    }
+
+    if embedding_height and embedding_width:
+        model_kwargs['embedding_height'] = embedding_height
+        model_kwargs['embedding_width'] = embedding_width
+
+    logger.info(f"Creating model with: embedding_dim={embedding_dim}, output_channels={output_channels}")
+
     model = ConvE(
         triples_factory=train_triples,
-        embedding_dim=embedding_dim,
-        output_channels=output_channels
+        **model_kwargs
     )
-    model.load_state_dict(state_dict)
-    model.eval()
-    logger.info(f"Model loaded successfully")
+
+    # Try to load state_dict
+    try:
+        model.load_state_dict(state_dict)
+        model.eval()
+        logger.info(f"Model loaded successfully")
+    except RuntimeError as e:
+        logger.error(f"Failed to load state_dict: {e}")
+        logger.info("Attempting to find correct embedding dimensions...")
+
+        # Extract expected size from error
+        import re
+        match = re.search(r'copying a param with shape torch\.Size\(\[(\d+), (\d+)\]\)', str(e))
+        if match:
+            expected_hr1d_in = int(match.group(2))
+            logger.info(f"  Checkpoint expects hr1d input size: {expected_hr1d_in}")
+
+            # Try different h, w combinations
+            found = False
+            for h in range(3, 100):
+                if embedding_dim % h == 0:
+                    w = embedding_dim // h
+                    test_model = ConvE(
+                        triples_factory=train_triples,
+                        embedding_dim=embedding_dim,
+                        output_channels=output_channels,
+                        embedding_height=h,
+                        embedding_width=w
+                    )
+
+                    if 'interaction.hr1d.0.weight' in test_model.state_dict():
+                        test_size = test_model.state_dict()['interaction.hr1d.0.weight'].shape[1]
+                        if test_size == expected_hr1d_in:
+                            logger.info(f"  ✓ Found: h={h}, w={w}")
+                            model = test_model
+                            model.load_state_dict(state_dict)
+                            model.eval()
+                            found = True
+                            break
+
+            if not found:
+                logger.error("Could not find matching configuration")
+                return
+        else:
+            logger.error("Could not parse error to find expected dimensions")
+            return
+
+    logger.info(f"Model loaded successfully with embedding_dim={embedding_dim}, output_channels={output_channels}")
 
     # Create analyzer
     analyzer = TracInAnalyzer(

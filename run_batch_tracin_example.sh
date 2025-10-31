@@ -14,10 +14,10 @@ NODE_NAME_DICT="/workspace/data/robokop/CGGD_alltreat/node_name_dict.txt"
 GRAPH_CACHE="/workspace/data/robokop/CGGD_alltreat/processed/train_graph_cache.pkl"
 
 # Test triples file
-TEST_TRIPLES="/workspace/data/robokop/CGGD_alltreat/results/20251017_top_test_triples.txt"
+TEST_TRIPLES="/workspace/data/robokop/CGGD_alltreat/dmdb_results/test_scores_top50.txt"
 
 # Output directory
-OUTPUT_DIR="/workspace/data/robokop/CGGD_alltreat/results/batch_tracin_top25"
+OUTPUT_DIR="/workspace/data/robokop/CGGD_alltreat/dmdb_results/batch_tracin_top50"
 
 # Run batch TracIn analysis
 cd "$(dirname "$0")"
@@ -29,7 +29,7 @@ echo "Test triples: examples/${TEST_TRIPLES}"
 echo "Output directory: ${OUTPUT_DIR}"
 echo ""
 echo "Configuration:"
-echo "  - N-hops: 2"
+echo "  - N-hops: 1"
 echo "  - Min degree: 2"
 echo "  - Top-k influences: 100"
 echo "  - Device: cuda"
@@ -53,7 +53,7 @@ python batch_tracin_with_filtering.py \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
     --batch-size 4 \
-    --num-last-layers 3
+    --no-use-last-layers
 
 echo ""
 echo "========================================"
