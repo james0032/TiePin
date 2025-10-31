@@ -467,12 +467,28 @@ def main():
     df = df[column_order]
     df.to_csv(csv_path, index=False)
 
-    logger.info(f"✓ Done! Scored {len(results)} triples")
-    logger.info(f"✓ Results saved to {args.output}")
-    logger.info(f"✓ CSV saved to {csv_path}")
+    # Create ranked version sorted by score (descending)
+    ranked_csv_path = args.output.replace('.json', '_ranked.csv')
+    df_ranked = df.sort_values('score', ascending=False).reset_index(drop=True)
+    # Add rank column
+    df_ranked.insert(0, 'rank', range(1, len(df_ranked) + 1))
+    df_ranked.to_csv(ranked_csv_path, index=False)
 
-    # Show some example scores
-    logger.info("\nExample scores (first 5 triples):")
+    # Create ranked JSON
+    ranked_json_path = args.output.replace('.json', '_ranked.json')
+    ranked_results = df_ranked.to_dict('records')
+    with open(ranked_json_path, 'w') as f:
+        json.dump(ranked_results, f, indent=2)
+
+    logger.info(f"✓ Done! Scored {len(results)} triples")
+    logger.info(f"✓ Results saved to:")
+    logger.info(f"  - Original order JSON: {args.output}")
+    logger.info(f"  - Original order CSV: {csv_path}")
+    logger.info(f"  - Ranked by score JSON: {ranked_json_path}")
+    logger.info(f"  - Ranked by score CSV: {ranked_csv_path}")
+
+    # Show some example scores from original order
+    logger.info("\nExample scores (first 5 triples in original order):")
     for i, result in enumerate(results[:5]):
         if 'head_name' in result:
             logger.info(f"  {i+1}. {result['head_name']} --[{result['relation_label']}]--> {result['tail_name']}")
@@ -483,6 +499,18 @@ def main():
             logger.info(f"      Score: {result['score']:.4f} (IDs: h={result['head_id']}, r={result['relation_id']}, t={result['tail_id']})")
         else:
             logger.info(f"  {i+1}. (h={result['head_id']}, r={result['relation_id']}, t={result['tail_id']}) → score={result['score']:.4f}")
+
+    # Show top 5 highest scoring triples
+    logger.info("\nTop 5 highest scoring triples:")
+    for i, result in enumerate(ranked_results[:5]):
+        if 'head_name' in result:
+            logger.info(f"  {result['rank']}. {result['head_name']} --[{result['relation_label']}]--> {result['tail_name']}")
+            logger.info(f"      Score: {result['score']:.4f}")
+        elif 'head_label' in result:
+            logger.info(f"  {result['rank']}. {result['head_label']} --[{result['relation_label']}]--> {result['tail_label']}")
+            logger.info(f"      Score: {result['score']:.4f}")
+        else:
+            logger.info(f"  {result['rank']}. (h={result['head_id']}, r={result['relation_id']}, t={result['tail_id']}) → score={result['score']:.4f}")
 
 
 if __name__ == '__main__':
