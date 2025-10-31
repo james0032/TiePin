@@ -271,33 +271,40 @@ def main():
             logger.info(f"  ✓ Inferred output_channels={output_channels} from interaction.hr1d.0.weight")
 
         # Try to infer embedding_height and embedding_width from hr1d layer size
+        # In ConvE, entity and relation embeddings are STACKED (not concatenated)
+        # So the reshaped input is [embedding_height, embedding_width * 2]
+        # where embedding_height * embedding_width = embedding_dim
         # The hr1d.0.weight has shape [output_dim, input_size]
-        # input_size = (h - kernel_h + 1) * (w - kernel_w + 1) * output_channels
+        # input_size = (h - kernel_h + 1) * (w*2 - kernel_w + 1) * output_channels
         if 'interaction.hr1d.0.weight' in state_dict and embedding_dim and output_channels:
             hr1d_input_size = state_dict['interaction.hr1d.0.weight'].shape[1]
             logger.info(f"  hr1d input size: {hr1d_input_size}")
 
             # Assuming kernel size 3x3 (default in ConvE)
             kernel_h, kernel_w = 3, 3
-            # hr1d_input_size = (h - 2) * (w - 2) * output_channels
+            # hr1d_input_size = (h - 2) * (w*2 - 2) * output_channels
             conv_output_size = hr1d_input_size // output_channels
-            logger.info(f"  Convolution output size (h-2)*(w-2): {conv_output_size}")
+            logger.info(f"  Convolution output size after conv: {conv_output_size}")
 
-            # Try to find h, w such that h*w = embedding_dim and (h-2)*(w-2) = conv_output_size
+            # Try to find h, w such that h*w = embedding_dim and (h-2)*(w*2-2) = conv_output_size
+            logger.info(f"  Searching for h, w where:")
+            logger.info(f"    h * w = {embedding_dim}")
+            logger.info(f"    (h-2) * (w*2-2) = {conv_output_size}")
+
             for h in range(3, 100):  # h must be at least 3 for kernel 3x3
                 if embedding_dim % h == 0:
                     w = embedding_dim // h
-                    if (h - 2) * (w - 2) == conv_output_size:
+                    if (h - 2) * (w * 2 - 2) == conv_output_size:
                         embedding_height = h
                         embedding_width = w
                         logger.info(f"  ✓ Inferred embedding_height={h}, embedding_width={w}")
                         logger.info(f"    Verification: {h}*{w}={h*w} (embedding_dim={embedding_dim})")
-                        logger.info(f"    Verification: ({h}-2)*({w}-2)={conv_output_size}")
+                        logger.info(f"    Verification: ({h}-2)*({w}*2-2)=({h-2})*{w*2-2}={conv_output_size}")
                         break
 
             if embedding_height is None:
                 logger.warning(f"Could not infer embedding dimensions from hr1d size")
-                logger.warning(f"  Need: h*w={embedding_dim} and (h-2)*(w-2)={conv_output_size}")
+                logger.warning(f"  Need: h*w={embedding_dim} and (h-2)*(w*2-2)={conv_output_size}")
 
         # Fallback: try common configurations
         if embedding_height is None and embedding_dim:
