@@ -194,32 +194,90 @@ def main():
     checkpoint = torch.load(model_file, map_location='cpu')
 
     # Determine if this is a state_dict only or a full checkpoint
+    state_dict = None
+    embedding_dim = None
+    output_channels = None
+    embedding_height = None
+    embedding_width = None
+
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         # Full checkpoint with metadata
         state_dict = checkpoint['model_state_dict']
-        embedding_dim = checkpoint.get('config', {}).get('embedding_dim', 200)
-        output_channels = checkpoint.get('config', {}).get('output_channels', 32)
-        logger.info(f"Loaded checkpoint with embedding_dim={embedding_dim}")
+        config = checkpoint.get('config', {})
+        embedding_dim = config.get('embedding_dim', None)
+        output_channels = config.get('output_channels', None)
+        embedding_height = config.get('embedding_height', None)
+        embedding_width = config.get('embedding_width', None)
+        logger.info(f"Loaded checkpoint with config: embedding_dim={embedding_dim}, output_channels={output_channels}")
     elif isinstance(checkpoint, dict):
-        # Just a state_dict
+        # Just a state_dict - infer parameters from tensor shapes
         state_dict = checkpoint
-        # Try to infer embedding_dim from state_dict
-        if 'entity_embeddings.weight' in state_dict:
-            embedding_dim = state_dict['entity_embeddings.weight'].shape[1]
-        else:
-            embedding_dim = 200  # default
-        output_channels = 32  # default
-        logger.info(f"Loaded state dict, inferred embedding_dim={embedding_dim}")
+        logger.info("Loaded state dict without config - inferring parameters from tensor shapes...")
+
+        # Infer embedding_dim from entity embeddings
+        # PyKEEN ConvE stores entity embeddings at 'entity_representations.0._embeddings.weight'
+        if 'entity_representations.0._embeddings.weight' in state_dict:
+            embedding_dim = state_dict['entity_representations.0._embeddings.weight'].shape[1]
+            logger.info(f"  Inferred embedding_dim={embedding_dim} from entity embeddings")
+
+        # Infer output_channels from the first linear layer after convolution
+        # The hr1d layer has shape [output_channels, ...] after convolution
+        if 'interaction.hr1d.0.weight' in state_dict:
+            output_channels = state_dict['interaction.hr1d.0.weight'].shape[0]
+            logger.info(f"  Inferred output_channels={output_channels} from hr1d layer")
+
+        # Try to infer embedding_height and embedding_width
+        # The input to hr1d.0 has shape [output_channels, height*width*output_channels]
+        if 'interaction.hr1d.0.weight' in state_dict and embedding_dim:
+            hr1d_input_size = state_dict['interaction.hr1d.0.weight'].shape[1]
+            # hr1d_input_size = (embedding_height - kernel_height + 1) * (embedding_width - kernel_width + 1) * output_channels
+            # We need to solve for height and width, but we need kernel size
+            # Let's try common configurations
+            # For embedding_dim and typical kernel size 3x3:
+            common_configs = [
+                (10, 20),  # Common for embedding_dim=200
+                (8, 4),    # Common for embedding_dim=32
+                (4, 8),    # Alternative for embedding_dim=32
+            ]
+            for h, w in common_configs:
+                if h * w == embedding_dim:
+                    embedding_height = h
+                    embedding_width = w
+                    logger.info(f"  Inferred embedding_height={h}, embedding_width={w}")
+                    break
     else:
         logger.error(f"Unknown checkpoint format")
         return
 
+    # Validate that we have the required parameters
+    if embedding_dim is None or output_channels is None:
+        logger.error("Could not determine model architecture parameters")
+        logger.error(f"embedding_dim={embedding_dim}, output_channels={output_channels}")
+        logger.error("Available keys in checkpoint:")
+        for key in list(state_dict.keys())[:10]:
+            logger.error(f"  {key}: {state_dict[key].shape}")
+        return
+
     # Create model with correct architecture
-    logger.info(f"Creating ConvE model...")
+    logger.info(f"Creating ConvE model with:")
+    logger.info(f"  embedding_dim={embedding_dim}")
+    logger.info(f"  output_channels={output_channels}")
+
+    model_kwargs = {
+        'embedding_dim': embedding_dim,
+        'output_channels': output_channels,
+    }
+
+    # Add embedding dimensions if we have them
+    if embedding_height and embedding_width:
+        model_kwargs['embedding_height'] = embedding_height
+        model_kwargs['embedding_width'] = embedding_width
+        logger.info(f"  embedding_height={embedding_height}")
+        logger.info(f"  embedding_width={embedding_width}")
+
     model = ConvE(
         triples_factory=test_triples,
-        embedding_dim=embedding_dim,
-        output_channels=output_channels
+        **model_kwargs
     )
 
     # Load state dict into model
