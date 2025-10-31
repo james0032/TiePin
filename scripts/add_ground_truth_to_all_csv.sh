@@ -14,7 +14,7 @@
 #   bash add_ground_truth_to_all_csv.sh dmdb_results ground_truth/drugmechdb_edges.jsonl
 #   bash add_ground_truth_to_all_csv.sh dmdb_results ground_truth/drugmechdb_edges.jsonl "_gt"
 
-set -e  # Exit on error
+# Note: Not using 'set -e' to allow processing all files even if one fails
 
 # Check arguments
 if [ "$#" -lt 2 ]; then
@@ -111,11 +111,11 @@ for CSV_FILE in "${CSV_FILES[@]}"; do
         --ground-truth "$GROUND_TRUTH_JSONL" \
         --output "$OUTPUT_FILE"; then
 
-        ((PROCESSED++))
+        PROCESSED=$((PROCESSED + 1))
         echo ""
         echo "✓ Successfully processed $FILENAME"
     else
-        ((FAILED++))
+        FAILED=$((FAILED + 1))
         echo ""
         echo "✗ Failed to process $FILENAME"
     fi
