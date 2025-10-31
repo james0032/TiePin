@@ -5,7 +5,7 @@
 # and TracIn analysis, generating CSV outputs with influence scores.
 
 # Configuration - UPDATE THESE PATHS
-MODEL_PATH="/workspace/data/robokop/CGGD_alltreat/checkpoints/conve_checkpoint_004.pt"
+MODEL_PATH="/workspace/data/robokop/CGGD_alltreat/checkpoints/conve_checkpoint_008.pt"
 TRAIN_FILE="/workspace/data/robokop/CGGD_alltreat/train.txt"
 ENTITY_TO_ID="/workspace/data/robokop/CGGD_alltreat/processed/entity_to_id.tsv"
 RELATION_TO_ID="/workspace/data/robokop/CGGD_alltreat/processed/relation_to_id.tsv"
@@ -33,7 +33,7 @@ echo "  - N-hops: 1"
 echo "  - Min degree: 2"
 echo "  - Top-k influences: 100"
 echo "  - Device: cuda"
-echo "  - Last layers only: enabled"
+echo "  - Last layers only: enabled (2 layers for speed)"
 echo ""
 echo "Expected time: ~8-12 minutes for 25 triples"
 echo "========================================"
@@ -53,7 +53,7 @@ python batch_tracin_with_filtering.py \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
     --batch-size 4 \
-    --no-use-last-layers
+
 
 echo ""
 echo "========================================"

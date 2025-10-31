@@ -134,7 +134,7 @@ def run_tracin_analysis(
     node_name_dict: str = None,
     top_k: int = None,
     device: str = 'cuda',
-    use_last_layers: bool = True,
+    use_last_layers: bool = False,
     num_last_layers: int = 2,
     batch_size: int = 512
 ) -> bool:
@@ -152,8 +152,8 @@ def run_tracin_analysis(
         node_name_dict: Optional path to node_name_dict.txt
         top_k: Number of top influences to compute (None = all influences)
         device: Device to use (cuda/cpu)
-        use_last_layers: Whether to use last layers only
-        num_last_layers: Number of last layers to track
+        use_last_layers: Whether to use last layers only (default: False = all layers)
+        num_last_layers: Number of last layers to track when use_last_layers=True
         batch_size: Batch size for processing
 
     Returns:
@@ -266,10 +266,10 @@ Example:
                         help='Device to use (default: cuda)')
     parser.add_argument('--batch-size', type=int, default=512,
                         help='Batch size (default: 512)')
-    parser.add_argument('--no-use-last-layers', action='store_true',
-                        help='Do not use last layers only (slower but more accurate)')
+    parser.add_argument('--use-last-layers-only', action='store_true',
+                        help='Only compute gradients for last layers (MUCH faster, following original TracIn paper)')
     parser.add_argument('--num-last-layers', type=int, default=2,
-                        help='Number of last layers to track (default: 2)')
+                        help='Number of last layers to track when --use-last-layers-only is set (default: 2)')
 
     # Execution control
     parser.add_argument('--start-index', type=int, default=0,
@@ -396,7 +396,7 @@ Example:
                 node_name_dict=args.node_name_dict,
                 top_k=args.top_k,
                 device=args.device,
-                use_last_layers=not args.no_use_last_layers,
+                use_last_layers=args.use_last_layers_only,
                 num_last_layers=args.num_last_layers,
                 batch_size=args.batch_size
             )

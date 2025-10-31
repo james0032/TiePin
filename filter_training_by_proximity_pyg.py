@@ -44,17 +44,24 @@ class ProximityFilterPyG:
         self.cache_path = cache_path
 
         # Try to load from cache
-        if cache_path and self._load_from_cache():
-            logger.info(f"Loaded graph from cache: {cache_path}")
+        cache_loaded = False
+        if cache_path:
+            logger.info(f"Attempting to load graph from cache: {cache_path}")
+            cache_loaded = self._load_from_cache()
+
+        if cache_loaded:
+            logger.info(f"✓ Successfully loaded graph from cache: {cache_path}")
         else:
+            if cache_path:
+                logger.info(f"Cache not available, building graph from scratch...")
             # Build PyG graph from scratch
             self._build_pyg_graph()
-            logger.info(f"Built new graph with {len(training_triples)} training triples")
+            logger.info(f"✓ Built new graph with {len(training_triples)} training triples")
 
             # Save to cache if requested
             if cache_path:
                 self._save_to_cache()
-                logger.info(f"Saved graph to cache: {cache_path}")
+                logger.info(f"✓ Saved graph to cache: {cache_path}")
 
     def _build_pyg_graph(self):
         """Build PyTorch Geometric graph from training triples."""
@@ -136,19 +143,31 @@ class ProximityFilterPyG:
             True if successfully loaded, False otherwise
         """
         try:
-            if not Path(self.cache_path).exists():
-                logger.info(f"Cache file not found: {self.cache_path}")
+            cache_path_obj = Path(self.cache_path)
+            if not cache_path_obj.exists():
+                logger.info(f"  Cache file does not exist: {self.cache_path}")
                 return False
+
+            logger.info(f"  Cache file found, loading...")
+            file_size_mb = cache_path_obj.stat().st_size / (1024 * 1024)
+            logger.info(f"  Cache file size: {file_size_mb:.1f} MB")
 
             with open(self.cache_path, 'rb') as f:
                 cache_data = pickle.load(f)
+
+            logger.info(f"  Cache contains {cache_data.get('num_triples', 'unknown')} triples")
 
             # Validate cache matches current data
             current_hash = self._compute_data_hash()
             cached_hash = cache_data.get('data_hash', '')
 
+            logger.info(f"  Current data hash: {current_hash[:8]}...")
+            logger.info(f"  Cached data hash:  {cached_hash[:8]}...")
+
             if current_hash != cached_hash:
-                logger.warning(f"Cache invalidated: training data has changed")
+                logger.warning(f"  ✗ Cache invalidated: training data hash mismatch")
+                logger.warning(f"     Current training triples: {len(self.training_triples)}")
+                logger.warning(f"     Cached training triples:  {cache_data.get('num_triples', 'unknown')}")
                 return False
 
             # Load cached data
@@ -157,11 +176,11 @@ class ProximityFilterPyG:
             self.node_degrees = cache_data['node_degrees']
             self.edge_to_triples = cache_data['edge_to_triples']
 
-            logger.info(f"Successfully loaded graph from cache ({cache_data['num_triples']} triples)")
+            logger.info(f"  ✓ Cache validated and loaded ({cache_data['num_triples']} triples)")
             return True
 
         except Exception as e:
-            logger.warning(f"Failed to load cache: {e}")
+            logger.warning(f"  ✗ Failed to load cache: {type(e).__name__}: {e}")
             return False
 
     @classmethod

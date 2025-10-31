@@ -637,11 +637,11 @@ def parse_args():
     )
     parser.add_argument(
         '--use-last-layers-only', action='store_true',
-        help='Only compute gradients for last layers (MUCH faster, following original TracIn paper)'
+        help='Only compute gradients for last layers (MUCH faster, following original TracIn paper). Default: False (use all layers for maximum accuracy)'
     )
     parser.add_argument(
         '--num-last-layers', type=int, default=2,
-        help='Number of last layers to track (default: 2). Options: 1 (fastest), 2-3 (recommended), 5+ (slower)'
+        help='Number of last layers to track when --use-last-layers-only is set (default: 2). Options: 1 (fastest), 2-3 (recommended), 5+ (slower)'
     )
     parser.add_argument(
         '--last-layer-names', type=str, nargs='+',
