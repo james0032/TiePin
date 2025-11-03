@@ -29,8 +29,10 @@ echo "Test triples: examples/${TEST_TRIPLES}"
 echo "Output directory: ${OUTPUT_DIR}"
 echo ""
 echo "Configuration:"
-echo "  - N-hops: 1"
+echo "  - N-hops: 2"
 echo "  - Min degree: 2"
+echo "  - Strict hop constraint: enabled"
+echo "  - Batch size: 16"
 echo "  - Top-k influences: 100"
 echo "  - Device: cuda"
 echo "  - Last layers only: enabled (2 layers for speed)"
@@ -48,11 +50,12 @@ python batch_tracin_with_filtering.py \
     --edge-map "${EDGE_MAP}" \
     --node-name-dict "${NODE_NAME_DICT}" \
     --output-dir "${OUTPUT_DIR}" \
-    --n-hops 1 \
+    --n-hops 2 \
     --min-degree 2 \
+    --strict-hop-constraint \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
-    --batch-size 4 \
+    --batch-size 16 \
 
 
 echo ""

@@ -72,7 +72,8 @@ def filter_training_data(
     n_hops: int = 2,
     min_degree: int = 2,
     cache_path: str = None,
-    preserve_test_edges: bool = True
+    preserve_test_edges: bool = True,
+    strict_hop_constraint: bool = False
 ) -> bool:
     """Filter training data by proximity to test triple.
 
@@ -84,6 +85,7 @@ def filter_training_data(
         min_degree: Minimum degree threshold
         cache_path: Optional path to cached graph
         preserve_test_edges: Whether to preserve edges containing test entities
+        strict_hop_constraint: Whether to enforce strict n-hop constraint
 
     Returns:
         True if successful, False otherwise
@@ -103,6 +105,9 @@ def filter_training_data(
 
     if not preserve_test_edges:
         cmd.append('--no-preserve-test-edges')
+
+    if strict_hop_constraint:
+        cmd.append('--strict-hop-constraint')
 
     logger.info(f"Running: {' '.join(cmd)}")
 
@@ -257,6 +262,9 @@ Example:
                         help='Path to cache graph (optional, speeds up filtering)')
     parser.add_argument('--no-preserve-test-edges', action='store_true',
                         help='Do not preserve edges containing test entities')
+    parser.add_argument('--strict-hop-constraint', action='store_true',
+                        help='Enforce strict n-hop constraint: both endpoints of each edge '
+                             'must be within n_hops (prevents distant shortcuts)')
 
     # TracIn parameters
     parser.add_argument('--top-k', type=int, default=None,
@@ -362,7 +370,8 @@ Example:
                 n_hops=args.n_hops,
                 min_degree=args.min_degree,
                 cache_path=args.cache,
-                preserve_test_edges=not args.no_preserve_test_edges
+                preserve_test_edges=not args.no_preserve_test_edges,
+                strict_hop_constraint=args.strict_hop_constraint
             )
 
             result['filtering_success'] = filter_success
