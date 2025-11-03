@@ -8,24 +8,35 @@ Updated [scripts/run_batch_tracin_example.sh](scripts/run_batch_tracin_example.s
 
 ### 1. Shell Script: `scripts/run_batch_tracin_example.sh`
 
-**Updated parameters** (lines 32-58):
+**Updated parameters** (lines 34-58):
 - ✅ `--n-hops`: Changed from `1` to `2` (more comprehensive neighborhood)
 - ✅ `--batch-size`: Changed from `4` to `16` (4x faster processing)
 - ✅ `--strict-hop-constraint`: **NEW** - Added flag for strict filtering
 
+**Fixed path resolution** (lines 23-25):
+- ✅ Fixed directory navigation to find `batch_tracin_with_filtering.py`
+- ✅ Script now correctly changes to parent directory from `scripts/`
+
 **Before**:
 ```bash
---n-hops 1 \
---min-degree 2 \
---batch-size 4 \
+cd "$(dirname "$0")"
+
+python batch_tracin_with_filtering.py \
+    --n-hops 1 \
+    --min-degree 2 \
+    --batch-size 4 \
 ```
 
 **After**:
 ```bash
---n-hops 2 \
---min-degree 2 \
---strict-hop-constraint \
---batch-size 16 \
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+python batch_tracin_with_filtering.py \
+    --n-hops 2 \
+    --min-degree 2 \
+    --strict-hop-constraint \
+    --batch-size 16 \
 ```
 
 ### 2. Python Script: `batch_tracin_with_filtering.py`
@@ -113,7 +124,9 @@ python batch_tracin_with_filtering.py \
 ## Files Modified
 
 1. **[scripts/run_batch_tracin_example.sh](scripts/run_batch_tracin_example.sh)**
-   - Lines 32-35: Updated configuration display
+   - Lines 23-25: **Fixed path resolution** (cd to parent directory)
+   - Line 30: Fixed test triples path display (removed incorrect "examples/" prefix)
+   - Lines 34-40: Updated configuration display
    - Lines 53-58: Updated command-line arguments
 
 2. **[batch_tracin_with_filtering.py](batch_tracin_with_filtering.py)**

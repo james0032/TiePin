@@ -20,12 +20,14 @@ TEST_TRIPLES="/workspace/data/robokop/CGGD_alltreat/dmdb_results/test_scores_top
 OUTPUT_DIR="/workspace/data/robokop/CGGD_alltreat/dmdb_results/batch_tracin_top50"
 
 # Run batch TracIn analysis
-cd "$(dirname "$0")"
+# Change to the parent directory (where batch_tracin_with_filtering.py is located)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "${SCRIPT_DIR}/.."
 
 echo "========================================"
 echo "Batch TracIn Analysis"
 echo "========================================"
-echo "Test triples: examples/${TEST_TRIPLES}"
+echo "Test triples: ${TEST_TRIPLES}"
 echo "Output directory: ${OUTPUT_DIR}"
 echo ""
 echo "Configuration:"
