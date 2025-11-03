@@ -200,12 +200,52 @@ class ProximityFilterPyG:
         """
         return cls(training_triples, cache_path=cache_path)
 
+    def _compute_hop_distances(self, test_entities: List[int], max_hops: int) -> torch.Tensor:
+        """Compute shortest hop distance from test entities to all nodes.
+
+        Args:
+            test_entities: List of test entity node IDs
+            max_hops: Maximum number of hops to compute
+
+        Returns:
+            Tensor of shape (num_nodes,) with hop distances.
+            Distance is -1 for unreachable nodes.
+        """
+        num_nodes = len(self.node_degrees)
+        distances = torch.full((num_nodes,), -1, dtype=torch.long)
+
+        # Initialize test entities with distance 0
+        current_layer = set(test_entities)
+        for node in current_layer:
+            distances[node] = 0
+
+        # BFS to compute distances
+        for hop in range(1, max_hops + 1):
+            next_layer = set()
+
+            for node in current_layer:
+                # Find all neighbors
+                neighbors = self.edge_index[1][self.edge_index[0] == node]
+                for neighbor in neighbors:
+                    neighbor = neighbor.item()
+                    if distances[neighbor] == -1:  # Not visited yet
+                        distances[neighbor] = hop
+                        next_layer.add(neighbor)
+
+            if len(next_layer) == 0:
+                break
+
+            current_layer = next_layer
+
+        return distances
+
     def filter_for_single_test_triple(
         self,
         test_triple: Tuple[int, int, int],
         n_hops: int = 2,
         min_degree: int = 2,
-        preserve_test_entity_edges: bool = True
+        preserve_test_entity_edges: bool = True,
+        strict_hop_constraint: bool = False
     ) -> np.ndarray:
         """Filter training triples for a single test triple using PyG.
 
@@ -214,6 +254,8 @@ class ProximityFilterPyG:
             n_hops: Number of hops from test entities
             min_degree: Minimum degree threshold
             preserve_test_entity_edges: If True, always keep edges with test entities
+            strict_hop_constraint: If True, enforce that BOTH endpoints of each edge
+                                  are within n_hops (prevents distant shortcuts)
 
         Returns:
             Filtered training triples array
@@ -222,7 +264,13 @@ class ProximityFilterPyG:
         test_h, test_t = int(test_h), int(test_t)
 
         logger.info(f"Filtering for test triple: ({test_h}, {test_r}, {test_t})")
-        logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}")
+        logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}, "
+                   f"strict_hop_constraint={strict_hop_constraint}")
+
+        # Compute hop distances if strict mode is enabled
+        if strict_hop_constraint:
+            hop_distances = self._compute_hop_distances([test_h, test_t], n_hops)
+            logger.info(f"Computed hop distances in strict mode")
 
         # Use PyG's k_hop_subgraph to get n-hop neighborhood
         # This is highly optimized and much faster than custom BFS
@@ -256,7 +304,7 @@ class ProximityFilterPyG:
             # Check filtering rules
             should_keep = False
 
-            # Rule 1: Preserve edges with test entities
+            # Rule 1: Preserve edges with test entities (evaluated first)
             if preserve_test_entity_edges:
                 if src == test_h or src == test_t or dst == test_h or dst == test_t:
                     should_keep = True
@@ -268,6 +316,16 @@ class ProximityFilterPyG:
 
                 if src_degree >= min_degree or dst_degree >= min_degree:
                     should_keep = True
+
+            # STRICT HOP CONSTRAINT: Apply after degree/preserve rules
+            # This ensures that even preserved edges must meet hop constraint
+            if should_keep and strict_hop_constraint:
+                src_dist = hop_distances[src].item()
+                dst_dist = hop_distances[dst].item()
+
+                # Skip if either endpoint is beyond n_hops or unreachable
+                if src_dist < 0 or src_dist > n_hops or dst_dist < 0 or dst_dist > n_hops:
+                    should_keep = False
 
             # Add corresponding triple indices
             if should_keep:
@@ -292,7 +350,8 @@ class ProximityFilterPyG:
         test_triples: np.ndarray,
         n_hops: int = 2,
         min_degree: int = 2,
-        preserve_test_entity_edges: bool = True
+        preserve_test_entity_edges: bool = True,
+        strict_hop_constraint: bool = False
     ) -> np.ndarray:
         """Filter training triples for multiple test triples using PyG.
 
@@ -303,12 +362,15 @@ class ProximityFilterPyG:
             n_hops: Number of hops from test entities
             min_degree: Minimum degree threshold
             preserve_test_entity_edges: If True, always keep edges with test entities
+            strict_hop_constraint: If True, enforce that BOTH endpoints of each edge
+                                  are within n_hops (prevents distant shortcuts)
 
         Returns:
             Filtered training triples array
         """
         logger.info(f"Filtering for {len(test_triples)} test triples")
-        logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}")
+        logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}, "
+                   f"strict_hop_constraint={strict_hop_constraint}")
 
         # Extract all test entities
         test_entities = set()
@@ -318,6 +380,11 @@ class ProximityFilterPyG:
 
         test_entity_list = list(test_entities)
         logger.info(f"Total test entities: {len(test_entity_list)}")
+
+        # Compute hop distances if strict mode is enabled
+        if strict_hop_constraint:
+            hop_distances = self._compute_hop_distances(test_entity_list, n_hops)
+            logger.info(f"Computed hop distances in strict mode")
 
         # Use PyG's k_hop_subgraph with all test entities at once
         subset_nodes, subset_edge_index, mapping, edge_mask = k_hop_subgraph(
@@ -360,6 +427,16 @@ class ProximityFilterPyG:
 
                 if src_degree >= min_degree or dst_degree >= min_degree:
                     should_keep = True
+
+            # STRICT HOP CONSTRAINT: Apply after degree/preserve rules
+            # This ensures that even preserved edges must meet hop constraint
+            if should_keep and strict_hop_constraint:
+                src_dist = hop_distances[src].item()
+                dst_dist = hop_distances[dst].item()
+
+                # Skip if either endpoint is beyond n_hops or unreachable
+                if src_dist < 0 or src_dist > n_hops or dst_dist < 0 or dst_dist > n_hops:
+                    should_keep = False
 
             if should_keep:
                 if (src, dst) in self.edge_to_triples:
@@ -426,7 +503,8 @@ def filter_training_file(
     min_degree: int = 2,
     preserve_test_entity_edges: bool = True,
     use_single_triple_mode: bool = False,
-    cache_path: Optional[str] = None
+    cache_path: Optional[str] = None,
+    strict_hop_constraint: bool = False
 ):
     """Filter training file based on proximity to test triples using PyG.
 
@@ -439,6 +517,7 @@ def filter_training_file(
         preserve_test_entity_edges: Keep edges with test entities
         use_single_triple_mode: If True, analyze first test triple only
         cache_path: Optional path to cache the graph object for reuse
+        strict_hop_constraint: If True, enforce strict n-hop constraint
     """
     logger.info(f"Loading training triples from {train_path}")
     train_triples = []
@@ -505,7 +584,8 @@ def filter_training_file(
             test_triple=test_triple,
             n_hops=n_hops,
             min_degree=min_degree,
-            preserve_test_entity_edges=preserve_test_entity_edges
+            preserve_test_entity_edges=preserve_test_entity_edges,
+            strict_hop_constraint=strict_hop_constraint
         )
     else:
         logger.info("Using multiple test triples mode")
@@ -513,7 +593,8 @@ def filter_training_file(
             test_triples=test_numeric,
             n_hops=n_hops,
             min_degree=min_degree,
-            preserve_test_entity_edges=preserve_test_entity_edges
+            preserve_test_entity_edges=preserve_test_entity_edges,
+            strict_hop_constraint=strict_hop_constraint
         )
 
     # Convert back to string labels
@@ -611,6 +692,9 @@ Benefits of PyG version:
                         help='Filter for single test triple only (first one)')
     parser.add_argument('--cache', type=str,
                         help='Path to cache the graph object (speeds up repeated runs)')
+    parser.add_argument('--strict-hop-constraint', action='store_true',
+                        help='Enforce strict n-hop constraint: both endpoints of each edge '
+                             'must be within n_hops (prevents distant shortcuts)')
 
     args = parser.parse_args()
 
@@ -622,5 +706,6 @@ Benefits of PyG version:
         min_degree=args.min_degree,
         preserve_test_entity_edges=args.preserve_test_edges,
         use_single_triple_mode=args.single_triple,
-        cache_path=args.cache
+        cache_path=args.cache,
+        strict_hop_constraint=args.strict_hop_constraint
     )
