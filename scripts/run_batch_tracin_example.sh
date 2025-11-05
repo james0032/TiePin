@@ -5,19 +5,19 @@
 # and TracIn analysis, generating CSV outputs with influence scores.
 
 # Configuration - UPDATE THESE PATHS
-MODEL_PATH="/workspace/data/robokop/CGGD_alltreat/checkpoints/conve_checkpoint_008.pt"
-TRAIN_FILE="/workspace/data/robokop/CGGD_alltreat/train.txt"
-ENTITY_TO_ID="/workspace/data/robokop/CGGD_alltreat/processed/entity_to_id.tsv"
-RELATION_TO_ID="/workspace/data/robokop/CGGD_alltreat/processed/relation_to_id.tsv"
-EDGE_MAP="/workspace/data/robokop/CGGD_alltreat/edge_map.json"
-NODE_NAME_DICT="/workspace/data/robokop/CGGD_alltreat/node_name_dict.txt"
-GRAPH_CACHE="/workspace/data/robokop/CGGD_alltreat/processed/train_graph_cache.pkl"
+MODEL_PATH="/workspace/data/robokop/original/checkpoints/conve_checkpoint_008.pt"
+TRAIN_FILE="/workspace/data/robokop/original/processed/train.txt"
+ENTITY_TO_ID="/workspace/data/robokop/original/processed/entity_to_id.tsv"
+RELATION_TO_ID="/workspace/data/robokop/original/processed/relation_to_id.tsv"
+EDGE_MAP="/workspace/data/robokop/original/processed/edge_map.json"
+NODE_NAME_DICT="/workspace/data/robokop/original/processed/node_name_dict.txt"
+GRAPH_CACHE="/workspace/data/robokop/original/processed/train_graph_cache.pkl"
 
 # Test triples file
-TEST_TRIPLES="/workspace/data/robokop/CGGD_alltreat/dmdb_results/test_scores_top50.txt"
+TEST_TRIPLES="/workspace/data/robokop/original/dmdb_results/test_scores_top50.txt"
 
 # Output directory
-OUTPUT_DIR="/workspace/data/robokop/CGGD_alltreat/dmdb_results/batch_tracin_top50"
+OUTPUT_DIR="/workspace/data/robokop/original/dmdb_results/batch_tracin_top50"
 
 # Run batch TracIn analysis
 # Change to the parent directory (where batch_tracin_with_filtering.py is located)
@@ -52,7 +52,7 @@ python batch_tracin_with_filtering.py \
     --edge-map "${EDGE_MAP}" \
     --node-name-dict "${NODE_NAME_DICT}" \
     --output-dir "${OUTPUT_DIR}" \
-    --n-hops 2 \
+    --n-hops 1 \
     --min-degree 2 \
     --strict-hop-constraint \
     --cache "${GRAPH_CACHE}" \
