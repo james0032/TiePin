@@ -95,10 +95,21 @@ def load_mechanistic_paths(csv_file: str) -> Dict[Tuple[str, str], List[str]]:
                 if intermediate_nodes_str == '[]':
                     intermediate_nodes = []
                 else:
-                    # Parse as Python literal (list of strings)
-                    intermediate_nodes = ast.literal_eval(intermediate_nodes_str)
-                    if not isinstance(intermediate_nodes, list):
-                        intermediate_nodes = []
+                    # Remove brackets and split by comma
+                    # Format is: "[CHEBI:17154, MONDO:0019975]"
+                    if intermediate_nodes_str.startswith('[') and intermediate_nodes_str.endswith(']'):
+                        # Remove brackets
+                        nodes_str = intermediate_nodes_str[1:-1].strip()
+                        if nodes_str:
+                            # Split by comma and strip whitespace
+                            intermediate_nodes = [node.strip() for node in nodes_str.split(',')]
+                        else:
+                            intermediate_nodes = []
+                    else:
+                        # Try ast.literal_eval as fallback for properly quoted strings
+                        intermediate_nodes = ast.literal_eval(intermediate_nodes_str)
+                        if not isinstance(intermediate_nodes, list):
+                            intermediate_nodes = []
 
                 paths[(drug, disease)] = intermediate_nodes
 
