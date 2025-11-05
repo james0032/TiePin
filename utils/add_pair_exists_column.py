@@ -40,21 +40,34 @@ def load_drug_disease_pairs_from_csv(csv_file: str) -> set:
         csv_file: Path to CSV file with Drug, Disease, [Intermediate Nodes] columns
 
     Returns:
-        Set of (drug, disease) tuples
+        Set of (drug, disease) tuples (excluding pairs with empty intermediate nodes)
     """
     pairs = set()
+    skipped_empty = 0
 
     with open(csv_file, 'r') as f:
         reader = csv.reader(f)
         next(reader)  # Skip header
 
         for row in reader:
-            if len(row) >= 2:
+            if len(row) >= 3:
+                drug = row[0].strip()
+                disease = row[1].strip()
+                intermediate_nodes = row[2].strip()
+
+                # Skip pairs with empty intermediate nodes list
+                if intermediate_nodes == "[]":
+                    skipped_empty += 1
+                    continue
+
+                pairs.add((drug, disease))
+            elif len(row) >= 2:
+                # If intermediate nodes column is missing, still add the pair
                 drug = row[0].strip()
                 disease = row[1].strip()
                 pairs.add((drug, disease))
 
-    print(f"Loaded {len(pairs)} drug-disease pairs from CSV file")
+    print(f"Loaded {len(pairs)} drug-disease pairs from CSV file (skipped {skipped_empty} pairs with empty intermediate nodes)")
     return pairs
 
 
