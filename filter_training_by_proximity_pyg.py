@@ -18,8 +18,62 @@ import numpy as np
 import torch
 from torch_geometric.data import Data
 from torch_geometric.utils import k_hop_subgraph, degree, to_undirected
+import time
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def timer(operation_name: str):
+    """Context manager for timing operations."""
+    start_time = time.time()
+    logger.info(f"⏱️  Starting: {operation_name}")
+    try:
+        yield
+    finally:
+        elapsed = time.time() - start_time
+        logger.info(f"✓ Completed {operation_name} in {elapsed:.2f}s")
+
+
+class PerformanceTracker:
+    """Track performance metrics for different operations."""
+
+    def __init__(self):
+        self.timings = {}
+        self.start_times = {}
+
+    def start(self, operation: str):
+        """Start timing an operation."""
+        self.start_times[operation] = time.time()
+
+    def end(self, operation: str):
+        """End timing an operation."""
+        if operation in self.start_times:
+            elapsed = time.time() - self.start_times[operation]
+            self.timings[operation] = elapsed
+            del self.start_times[operation]
+            return elapsed
+        return 0
+
+    def report(self):
+        """Print performance report."""
+        logger.info("\n" + "="*60)
+        logger.info("PERFORMANCE BREAKDOWN")
+        logger.info("="*60)
+
+        total_time = sum(self.timings.values())
+
+        # Sort by time (descending)
+        sorted_timings = sorted(self.timings.items(), key=lambda x: x[1], reverse=True)
+
+        for operation, elapsed in sorted_timings:
+            percentage = (elapsed / total_time * 100) if total_time > 0 else 0
+            logger.info(f"  {operation:40s}: {elapsed:8.2f}s ({percentage:5.1f}%)")
+
+        logger.info("-"*60)
+        logger.info(f"  {'TOTAL':40s}: {total_time:8.2f}s (100.0%)")
+        logger.info("="*60 + "\n")
 
 
 class ProximityFilterPyG:
@@ -519,6 +573,11 @@ def filter_training_file(
         cache_path: Optional path to cache the graph object for reuse
         strict_hop_constraint: If True, enforce strict n-hop constraint
     """
+    perf = PerformanceTracker()
+    perf.start("TOTAL_EXECUTION")
+
+    # Step 1: Load training triples
+    perf.start("1. Load training triples from disk")
     logger.info(f"Loading training triples from {train_path}")
     train_triples = []
     with open(train_path, 'r') as f:
@@ -526,7 +585,10 @@ def filter_training_file(
             parts = line.strip().split('\t')
             if len(parts) >= 3:
                 train_triples.append(parts[:3])
+    perf.end("1. Load training triples from disk")
 
+    # Step 2: Load test triples
+    perf.start("2. Load test triples from disk")
     logger.info(f"Loading test triples from {test_path}")
     test_triples = []
     with open(test_path, 'r') as f:
@@ -534,10 +596,11 @@ def filter_training_file(
             parts = line.strip().split('\t')
             if len(parts) >= 3:
                 test_triples.append(parts[:3])
-
     logger.info(f"Loaded {len(train_triples)} training, {len(test_triples)} test triples")
+    perf.end("2. Load test triples from disk")
 
-    # Create entity/relation mappings
+    # Step 3: Create entity/relation mappings
+    perf.start("3. Build entity/relation ID mappings")
     entity_to_idx = {}
     idx_to_entity = {}
     relation_to_idx = {}
@@ -562,7 +625,11 @@ def filter_training_file(
             relation_to_idx[r] = current_relation_idx
             current_relation_idx += 1
 
-    # Convert to numeric arrays
+    logger.info(f"Created mappings: {len(entity_to_idx)} entities, {len(relation_to_idx)} relations")
+    perf.end("3. Build entity/relation ID mappings")
+
+    # Step 4: Convert to numeric arrays
+    perf.start("4. Convert triples to numeric format")
     train_numeric = np.array([
         [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
         for h, r, t in train_triples
@@ -572,11 +639,15 @@ def filter_training_file(
         [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
         for h, r, t in test_triples
     ])
+    perf.end("4. Convert triples to numeric format")
 
-    # Create PyG filter (with optional caching)
+    # Step 5: Create PyG filter (load cache or build graph)
+    perf.start("5. Initialize ProximityFilterPyG (cache/build)")
     filter_obj = ProximityFilterPyG(train_numeric, cache_path=cache_path)
+    perf.end("5. Initialize ProximityFilterPyG (cache/build)")
 
-    # Filter
+    # Step 6: Filter triples
+    perf.start("6. Filter triples (k-hop subgraph + degree)")
     if use_single_triple_mode and len(test_numeric) > 0:
         logger.info("Using single test triple mode (first triple only)")
         test_triple = tuple(test_numeric[0])
@@ -596,16 +667,23 @@ def filter_training_file(
             preserve_test_entity_edges=preserve_test_entity_edges,
             strict_hop_constraint=strict_hop_constraint
         )
+    perf.end("6. Filter triples (k-hop subgraph + degree)")
 
-    # Convert back to string labels
+    # Step 7: Convert back to string labels
+    perf.start("7. Convert filtered triples back to strings")
+    # Create inverse relation mapping for faster lookup
+    idx_to_relation = {v: k for k, v in relation_to_idx.items()}
+
     filtered_triples = []
     for h_idx, r_idx, t_idx in filtered_numeric:
         h = idx_to_entity[h_idx]
-        r = list(relation_to_idx.keys())[list(relation_to_idx.values()).index(r_idx)]
+        r = idx_to_relation[r_idx]
         t = idx_to_entity[t_idx]
         filtered_triples.append([h, r, t])
+    perf.end("7. Convert filtered triples back to strings")
 
-    # Write filtered triples
+    # Step 8: Write filtered triples
+    perf.start("8. Write filtered triples to disk")
     logger.info(f"Writing {len(filtered_triples)} filtered triples to {output_path}")
 
     # Create output directory if it doesn't exist
@@ -615,10 +693,16 @@ def filter_training_file(
     with open(output_path, 'w') as f:
         for h, r, t in filtered_triples:
             f.write(f"{h}\t{r}\t{t}\n")
+    perf.end("8. Write filtered triples to disk")
+
+    # Step 9: Compute statistics
+    perf.start("9. Compute statistics")
+    stats = filter_obj.get_statistics(filtered_numeric)
+    perf.end("9. Compute statistics")
+
+    perf.end("TOTAL_EXECUTION")
 
     # Print statistics
-    stats = filter_obj.get_statistics(filtered_numeric)
-
     logger.info("\nFiltering Statistics:")
     logger.info(f"  Original training triples: {len(train_triples)}")
     logger.info(f"  Filtered training triples: {stats['num_triples']}")
@@ -629,6 +713,9 @@ def filter_training_file(
     logger.info(f"  Degree range: [{stats['min_degree']}, {stats['max_degree']}]")
 
     logger.info(f"\nFiltered training saved to: {output_path}")
+
+    # Print performance report
+    perf.report()
 
 
 if __name__ == '__main__':
@@ -695,17 +782,59 @@ Benefits of PyG version:
     parser.add_argument('--strict-hop-constraint', action='store_true',
                         help='Enforce strict n-hop constraint: both endpoints of each edge '
                              'must be within n_hops (prevents distant shortcuts)')
+    parser.add_argument('--profile', action='store_true',
+                        help='Enable detailed profiling with cProfile (outputs to profile.stats)')
 
     args = parser.parse_args()
 
-    filter_training_file(
-        train_path=args.train,
-        test_path=args.test,
-        output_path=args.output,
-        n_hops=args.n_hops,
-        min_degree=args.min_degree,
-        preserve_test_entity_edges=args.preserve_test_edges,
-        use_single_triple_mode=args.single_triple,
-        cache_path=args.cache,
-        strict_hop_constraint=args.strict_hop_constraint
-    )
+    if args.profile:
+        import cProfile
+        import pstats
+
+        logger.info("=" * 60)
+        logger.info("PROFILING ENABLED - Running with cProfile")
+        logger.info("=" * 60)
+
+        profiler = cProfile.Profile()
+        profiler.enable()
+
+        filter_training_file(
+            train_path=args.train,
+            test_path=args.test,
+            output_path=args.output,
+            n_hops=args.n_hops,
+            min_degree=args.min_degree,
+            preserve_test_entity_edges=args.preserve_test_edges,
+            use_single_triple_mode=args.single_triple,
+            cache_path=args.cache,
+            strict_hop_constraint=args.strict_hop_constraint
+        )
+
+        profiler.disable()
+
+        # Save detailed stats
+        profiler.dump_stats('profile.stats')
+        logger.info("\n" + "=" * 60)
+        logger.info("Profiling results saved to: profile.stats")
+        logger.info("To view: python -m pstats profile.stats")
+        logger.info("=" * 60)
+
+        # Print top 30 time-consuming functions
+        logger.info("\nTop 30 functions by cumulative time:")
+        logger.info("-" * 60)
+        stats = pstats.Stats(profiler)
+        stats.sort_stats('cumulative')
+        stats.print_stats(30)
+
+    else:
+        filter_training_file(
+            train_path=args.train,
+            test_path=args.test,
+            output_path=args.output,
+            n_hops=args.n_hops,
+            min_degree=args.min_degree,
+            preserve_test_entity_edges=args.preserve_test_edges,
+            use_single_triple_mode=args.single_triple,
+            cache_path=args.cache,
+            strict_hop_constraint=args.strict_hop_constraint
+        )

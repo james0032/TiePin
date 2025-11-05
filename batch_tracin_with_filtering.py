@@ -115,15 +115,16 @@ def filter_training_data(
         result = subprocess.run(
             cmd,
             check=True,
-            capture_output=True,
+            # Let stdout/stderr pass through to console (don't capture)
+            # This allows real-time log viewing
+            stdout=None,  # Inherit stdout
+            stderr=None,  # Inherit stderr
             text=True
         )
         logger.info("Filtering completed successfully")
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"Filtering failed: {e}")
-        logger.error(f"Stdout: {e.stdout}")
-        logger.error(f"Stderr: {e.stderr}")
         return False
 
 
@@ -200,16 +201,16 @@ def run_tracin_analysis(
         result = subprocess.run(
             cmd,
             check=True,
-            capture_output=True,
+            # Let stdout/stderr pass through to console (don't capture)
+            # This allows real-time log viewing
+            stdout=None,  # Inherit stdout
+            stderr=None,  # Inherit stderr
             text=True
         )
         logger.info("TracIn analysis completed successfully")
-        logger.info(result.stdout)
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"TracIn analysis failed: {e}")
-        logger.error(f"Stdout: {e.stdout}")
-        logger.error(f"Stderr: {e.stderr}")
         return False
 
 

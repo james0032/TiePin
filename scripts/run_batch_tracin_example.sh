@@ -7,8 +7,8 @@
 # Configuration - UPDATE THESE PATHS
 MODEL_PATH="/workspace/data/robokop/original/checkpoints/conve_checkpoint_008.pt"
 TRAIN_FILE="/workspace/data/robokop/original/processed/train.txt"
-ENTITY_TO_ID="/workspace/data/robokop/original/processed/entity_to_id.tsv"
-RELATION_TO_ID="/workspace/data/robokop/original/processed/relation_to_id.tsv"
+ENTITY_TO_ID="/workspace/data/robokop/original/processed/node_dict.txt"
+RELATION_TO_ID="/workspace/data/robokop/original/processed/rel_dict.txt"
 EDGE_MAP="/workspace/data/robokop/original/processed/edge_map.json"
 NODE_NAME_DICT="/workspace/data/robokop/original/processed/node_name_dict.txt"
 GRAPH_CACHE="/workspace/data/robokop/original/processed/train_graph_cache.pkl"
@@ -43,6 +43,14 @@ echo "Expected time: ~8-12 minutes for 25 triples"
 echo "========================================"
 echo ""
 
+# Create output directory for logs
+mkdir -p "${OUTPUT_DIR}"
+LOG_FILE="${OUTPUT_DIR}/batch_tracin_run_$(date +%Y%m%d_%H%M%S).log"
+
+echo "All output will be logged to: ${LOG_FILE}"
+echo ""
+
+# Run with tee to show output and save to log file simultaneously
 python batch_tracin_with_filtering.py \
     --test-triples "${TEST_TRIPLES}" \
     --model-path "${MODEL_PATH}" \
@@ -58,6 +66,7 @@ python batch_tracin_with_filtering.py \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
     --batch-size 16 \
+    2>&1 | tee "${LOG_FILE}"
 
 
 echo ""
@@ -66,10 +75,14 @@ echo "Batch processing complete!"
 echo "========================================"
 echo ""
 echo "Output files:"
+echo "  - Log file: ${LOG_FILE}"
 echo "  - Filtered training: ${OUTPUT_DIR}/filtered_training/"
 echo "  - TracIn CSV files: ${OUTPUT_DIR}/*_tracin.csv"
 echo "  - TracIn JSON files: ${OUTPUT_DIR}/*_tracin.json"
 echo "  - Summary: ${OUTPUT_DIR}/batch_tracin_summary.json"
+echo ""
+echo "To view log file:"
+echo "  less ${LOG_FILE}"
 echo ""
 echo "To analyze results:"
 echo "  python -c 'import json; print(json.load(open(\"${OUTPUT_DIR}/batch_tracin_summary.json\", \"r\")))'"
