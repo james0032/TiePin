@@ -1,19 +1,15 @@
-# ConvE with PyKEEN
+# **T**rac**I**n on **E**dge **P**red**i**ct**i**o**n**
 
-This repository provides a complete implementation of ConvE (Convolutional Knowledge Graph Embeddings) using PyKEEN, with support for:
-
-- Custom data preprocessing from your existing triple format
-- Detailed per-triple evaluation and predictions
-- TracIn analysis for understanding training data influence
-- Cross-method comparison using fixed entity/relation indices
+This repository provides a complete implementation of the TracIn method adapted to edge prediction algorithms such as ConvE (Convolutional Knowledge Graph Embeddings). This repository supports efficient data preprocessing for training-ready input datasets, running edge prediction methods using PyKEEN, TracIn analysis, and an evaluation suite for characterization of TracIn results.
 
 ## Features
 
-- **PyKEEN Integration**: Leverages PyKEEN's robust training pipeline and optimizations
-- **Custom Evaluation**: Get predictions and rankings for each test triple
-- **TracIn Support**: Analyze which training examples influence specific predictions
-- **Compatible Data Format**: Maintains your existing node_dict and rel_dict indices for cross-method comparison
-- **Comprehensive Metrics**: MR, MRR, Hits@k with filtered evaluation
+- **TracIn Analysis**: Compute training data influence on edge prediction models to understand which training examples affect specific predictions
+- **Edge Prediction Models**: Support for ConvE and other knowledge graph embedding methods via PyKEEN integration
+- **Efficient Data Preprocessing**: Convert custom triple formats to training-ready datasets while preserving entity and relation indices
+- **Comprehensive Evaluation Suite**: Detailed per-triple predictions, rankings, and influence scores for characterizing model behavior
+- **Compatible Data Format**: Maintains existing node_dict and rel_dict indices for cross-method comparison
+- **Filtered Evaluation Metrics**: Mean Rank (MR), Mean Reciprocal Rank (MRR), and Hits@k with filtered evaluation protocol
 
 ## Installation
 
@@ -348,7 +344,17 @@ other_predictions = load_predictions('other_method_results.json')
 assert conve_predictions[0]['head'] == other_predictions[0]['head']
 ```
 
-## Model Architecture
+## Architecture Overview
+
+### TracIn Method for Edge Prediction
+
+TracIn (Tracing Influence) estimates the influence of training examples on model predictions by tracing gradient descent. This implementation adapts TracIn to edge prediction tasks:
+
+1. **Gradient Computation**: Track gradients of training examples throughout the training process
+2. **Influence Estimation**: Compute dot products of test and training gradients to estimate influence
+3. **Training Data Attribution**: Identify which training edges most strongly affect predictions for specific test edges
+
+### ConvE Edge Prediction Model
 
 ConvE uses 2D convolution over reshaped entity and relation embeddings:
 
