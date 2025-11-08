@@ -1,6 +1,6 @@
 # **T**rac**I**n on **E**dge **P**red**i**ct**i**o**n**
 
-This repository provides a complete implementation of the TracIn method adapted to edge prediction algorithms such as ConvE (Convolutional Knowledge Graph Embeddings). This repository supports efficient data preprocessing for training-ready input datasets, running edge prediction methods using PyKEEN, TracIn analysis, and an evaluation suite for characterization of TracIn results.
+**T**rac**I**n on **E**dge **P**red**i**ctio**n** (TiePin) provides a complete implementation of the TracIn method adapted to edge prediction algorithms such as ConvE (Convolutional Knowledge Graph Embeddings). This repository supports efficient data preprocessing for training-ready input datasets, running edge prediction methods using PyKEEN, TracIn analysis, and an evaluation suite for characterization of TracIn results.
 
 ## Features
 
