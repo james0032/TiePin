@@ -1,20 +1,93 @@
-#######------- This script is to filter out all treats edges from any resource in robokop and extract 
-#mechanistic paths from drugmechdb only.--------######
+"""
+================================================================================
+Find Mechanistic Paths from DrugMechDB
+================================================================================
+
+This script extracts mechanistic paths from DrugMechDB that explain drug-disease
+treatment relationships (biolink:treats edges).
+
+OVERVIEW:
+---------
+1. Extracts all 'biolink:treats' edges from the input edges file
+2. Builds a graph from DrugMechDB edges only
+3. For each drug-disease pair from treats edges, finds all DrugMechDB paths
+   that connect them, using the pre-defined drugmechdb_path_id
+4. Outputs results showing Drug, Disease, Intermediate Nodes, and drugmechdb_path_id
+
+REQUIRED INPUT FILES:
+--------------------
+- edges_file: JSONL file (optionally gzipped) containing graph edges
+  * Must contain 'biolink:treats' edges
+  * Must contain DrugMechDB edges with 'drugmechdb_path_id' property
+  * Format: One JSON object per line with fields:
+    - subject: source node ID
+    - object: target node ID
+    - predicate: relationship type (e.g., 'biolink:treats')
+    - primary_knowledge_source: source database (e.g., 'infores:drugmechdb')
+    - drugmechdb_path_id: list of path IDs (for DrugMechDB edges only)
+
+OUTPUT FILES:
+-------------
+1. drugmechdb_path_id_results.txt (NEW METHOD - recommended)
+   - Format: Drug,Disease,Intermediate_Nodes,drugmechdb_path_id
+   - Each row represents one pre-defined DrugMechDB path connecting a drug-disease pair
+
+2. treats_mechanistic_paths.json (OLD METHOD - for reference)
+   - Full JSON output with all mechanistic paths found via graph search
+
+3. treats_mechanistic_paths.txt (OLD METHOD)
+   - Text format with one row per path found
+
+4. dedup_treats_mechanistic_paths.txt (OLD METHOD)
+   - Deduplicated drug-disease pairs with all intermediate nodes merged
+
+COMMAND LINE ARGUMENTS:
+-----------------------
+--edges_file        : Path to input edges JSONL file (default: roboedges.jsonl.gz)
+--max_length        : Maximum path length to search (default: 5)
+--output_dir        : Directory for output files (default: current directory)
+--run_old_method    : Run old graph search method in addition to path_id method (default: False)
+
+EXAMPLE USAGE:
+--------------
+python find_mechanistic_paths.py --edges_file /path/to/edges.jsonl.gz --max_length 5
+
+python find_mechanistic_paths.py --edges_file edges.jsonl --output_dir ./results/
+
+DEPENDENCIES:
+-------------
+- gzip, json, collections (standard library)
+- torch, torch_geometric (for graph operations)
+- networkx (for path finding)
+
+================================================================================
+"""
+
 import gzip
 import json
+import argparse
+import os
 from collections import defaultdict
 import torch
 from torch_geometric.data import Data
 import networkx as nx
 
+def open_edges_file(edges_file):
+    """Open edges file, handling both gzipped and plain text files"""
+    if edges_file.endswith('.gz'):
+        return gzip.open(edges_file, 'rt')
+    else:
+        return open(edges_file, 'r')
+
 def extract_treats_edges(edges_file='roboedges.jsonl.gz'):
     """Extract all edges with 'biolink:treats' predicate"""
-    
+
     treats_edges = []
     total_lines = 0
-    
+
     print("Step 1: Extracting 'biolink:treats' edges...")
-    with gzip.open(edges_file, 'rt') as f:
+    print(f"  Reading from: {edges_file}")
+    with open_edges_file(edges_file) as f:
         for line in f:
             total_lines += 1
             if total_lines % 100000 == 0:
@@ -41,7 +114,8 @@ def build_drugmechdb_graph(edges_file='roboedges.jsonl.gz'):
     path_id_map = defaultdict(lambda: {'edges': [], 'nodes': set()})
 
     print("\nStep 2: Building DrugMechDB graph...")
-    with gzip.open(edges_file, 'rt') as f:
+    print(f"  Reading from: {edges_file}")
+    with open_edges_file(edges_file) as f:
         for line in f:
             record = json.loads(line)
 
@@ -254,11 +328,77 @@ def find_all_mechanistic_paths(treats_edges, edge_index, idx_to_node, node_to_id
 
     return results
 
-def summarize_results(results):
-    """Summarize the mechanistic paths found"""
-    
+def summarize_path_id_results(path_id_results):
+    """Summarize the path_id-based mechanistic paths found"""
+
     print(f"\n{'='*70}")
-    print("MECHANISTIC PATH SUMMARY")
+    print("DRUGMECHDB PATH_ID SUMMARY")
+    print(f"{'='*70}")
+
+    if not path_id_results:
+        print("No paths found.")
+        return
+
+    # Overall statistics
+    total_paths = len(path_id_results)
+    unique_pairs = len(set((r['drug'], r['disease']) for r in path_id_results))
+    paths_with_intermediates = sum(1 for r in path_id_results if r['intermediate_nodes'])
+
+    print(f"Total drugmechdb_path_ids: {total_paths}")
+    print(f"Unique drug-disease pairs: {unique_pairs}")
+    print(f"Paths with intermediate nodes: {paths_with_intermediates}")
+    print(f"Paths without intermediate nodes (direct): {total_paths - paths_with_intermediates}")
+
+    if unique_pairs > 0:
+        avg_paths_per_pair = total_paths / unique_pairs
+        print(f"Average paths per drug-disease pair: {avg_paths_per_pair:.2f}")
+
+    # Intermediate node statistics
+    all_intermediates = []
+    for r in path_id_results:
+        all_intermediates.extend(r['intermediate_nodes'])
+
+    if all_intermediates:
+        unique_intermediates = set(all_intermediates)
+        print(f"\nIntermediate node statistics:")
+        print(f"  Total intermediate node occurrences: {len(all_intermediates)}")
+        print(f"  Unique intermediate nodes: {len(unique_intermediates)}")
+
+        # Path length distribution
+        path_lengths = [len(r['intermediate_nodes']) + 2 for r in path_id_results]  # +2 for drug and disease
+        length_dist = defaultdict(int)
+        for length in path_lengths:
+            length_dist[length] += 1
+
+        print(f"\nPath length distribution:")
+        for length in sorted(length_dist.keys()):
+            print(f"  Length {length}: {length_dist[length]} paths")
+
+    # Show examples
+    print(f"\nSample paths:")
+    examples_shown = 0
+    for r in path_id_results:
+        if examples_shown >= 5:
+            break
+
+        print(f"\n  Path ID: {r['drugmechdb_path_id']}")
+        print(f"    Drug: {r['drug']}")
+        print(f"    Disease: {r['disease']}")
+        if r['intermediate_nodes']:
+            print(f"    Intermediate nodes: {', '.join(r['intermediate_nodes'])}")
+        else:
+            print(f"    Intermediate nodes: (none - direct path)")
+        print(f"    Edges in path:")
+        for edge in r['edges']:
+            print(f"      {edge['subject']} --[{edge['predicate']}]--> {edge['object']}")
+
+        examples_shown += 1
+
+def summarize_results(results):
+    """Summarize the mechanistic paths found (OLD METHOD)"""
+
+    print(f"\n{'='*70}")
+    print("MECHANISTIC PATH SUMMARY (OLD METHOD)")
     print(f"{'='*70}")
     
     # Overall statistics
@@ -324,13 +464,14 @@ def summarize_results(results):
             
             examples_shown += 1
 
-def save_results(results, output_file='treats_mechanistic_paths.json'):
+def save_results(results, output_file='treats_mechanistic_paths.json', output_dir='.'):
     """Save results to JSON file"""
-    
+
+    output_path = os.path.join(output_dir, output_file)
     print(f"\n{'='*70}")
-    print(f"Saving results to {output_file}...")
-    
-    with open(output_file, 'w') as f:
+    print(f"Saving results to {output_path}...")
+
+    with open(output_path, 'w') as f:
         json.dump({
             'total_treats_edges': len(results),
             'treats_edges_with_paths': sum(1 for r in results if r['num_mechanistic_paths'] > 0),
@@ -338,18 +479,18 @@ def save_results(results, output_file='treats_mechanistic_paths.json'):
             'results': results
         }, f, indent=2)
     
-    import os
-    file_size_mb = os.path.getsize(output_file) / (1024 * 1024)
-    print(f"✓ Saved to {output_file} ({file_size_mb:.2f} MB)")
+    file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    print(f"✓ Saved to {output_path} ({file_size_mb:.2f} MB)")
 
-def save_results_txt(results, output_txt='treats_mechanistic_paths.txt'):
+def save_results_txt(results, output_txt='treats_mechanistic_paths.txt', output_dir='.'):
     """Save mechanistic paths to a .txt file in the format:
        Drug, Disease, [list of intermediate nodes in the mechanistic path]
     """
+    output_path = os.path.join(output_dir, output_txt)
     print(f"\n{'='*70}")
-    print(f"Saving simplified results to {output_txt}...")
+    print(f"Saving simplified results to {output_path}...")
 
-    with open(output_txt, 'w') as f:
+    with open(output_path, 'w') as f:
         f.write("Drug,Disease,[Intermediate Nodes]\n")
         for r in results:
             drug = r['treats_edge']['subject']
@@ -363,12 +504,11 @@ def save_results_txt(results, output_txt='treats_mechanistic_paths.txt'):
                 intermediates_str = "[" + ", ".join(intermediates) + "]"
                 f.write(f"{drug},{disease},{intermediates_str}\n")
 
-    import os
-    file_size_kb = os.path.getsize(output_txt) / 1024
-    print(f"✓ Saved to {output_txt} ({file_size_kb:.2f} KB)")
+    file_size_kb = os.path.getsize(output_path) / 1024
+    print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB)")
 
 
-def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_paths.txt'):
+def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_paths.txt', output_dir='.'):
     """Save deduplicated mechanistic paths to a .txt file.
 
     For each unique (drug, disease) pair, merges all intermediate nodes
@@ -376,8 +516,9 @@ def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_
 
     Format: Drug,Disease,[Intermediate Nodes]
     """
+    output_path = os.path.join(output_dir, output_txt)
     print(f"\n{'='*70}")
-    print(f"Saving deduplicated results to {output_txt}...")
+    print(f"Saving deduplicated results to {output_path}...")
 
     # Build dictionary: (drug, disease) -> set of all intermediate nodes
     pair_to_intermediates = {}
@@ -398,7 +539,7 @@ def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_
                 pair_to_intermediates[pair].update(intermediates)
 
     # Write deduplicated results
-    with open(output_txt, 'w') as f:
+    with open(output_path, 'w') as f:
         f.write("Drug,Disease,[Intermediate Nodes]\n")
 
         # Sort by drug, then disease for consistent output
@@ -407,25 +548,25 @@ def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_
             intermediates_str = "[" + ", ".join(intermediates) + "]"
             f.write(f"{drug},{disease},{intermediates_str}\n")
 
-    import os
-    file_size_kb = os.path.getsize(output_txt) / 1024
+    file_size_kb = os.path.getsize(output_path) / 1024
 
     total_pairs = len(pair_to_intermediates)
     pairs_with_intermediates = sum(1 for nodes in pair_to_intermediates.values() if nodes)
 
-    print(f"✓ Saved to {output_txt} ({file_size_kb:.2f} KB)")
+    print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB)")
     print(f"  Total unique drug-disease pairs: {total_pairs}")
     print(f"  Pairs with intermediate nodes: {pairs_with_intermediates}")
 
-def save_path_id_results(results, output_txt='drugmechdb_path_id_results.txt'):
+def save_path_id_results(results, output_txt='drugmechdb_path_id_results.txt', output_dir='.'):
     """Save results grouped by drugmechdb_path_id to a .txt file.
 
     Format: Drug,Disease,[Intermediate Nodes],drugmechdb_path_id
     """
+    output_path = os.path.join(output_dir, output_txt)
     print(f"\n{'='*70}")
-    print(f"Saving path_id-based results to {output_txt}...")
+    print(f"Saving path_id-based results to {output_path}...")
 
-    with open(output_txt, 'w') as f:
+    with open(output_path, 'w') as f:
         f.write("Drug,Disease,Intermediate_Nodes,drugmechdb_path_id\n")
 
         for r in results:
@@ -439,44 +580,124 @@ def save_path_id_results(results, output_txt='drugmechdb_path_id_results.txt'):
 
             f.write(f"{drug},{disease},{intermediates_str},{path_id}\n")
 
-    import os
-    file_size_kb = os.path.getsize(output_txt) / 1024
+    file_size_kb = os.path.getsize(output_path) / 1024
 
-    print(f"✓ Saved to {output_txt} ({file_size_kb:.2f} KB)")
+    print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB)")
     print(f"  Total paths: {len(results)}")
     print(f"  Paths with intermediate nodes: {sum(1 for r in results if r['intermediate_nodes'])}")
 
-def main():
-    # Step 1: Extract all treats edges
-    treats_edges = extract_treats_edges()
-
-    # Step 2: Build DrugMechDB graph and extract path_id information
-    edge_index, idx_to_node, edge_attributes, node_to_idx, path_id_map = build_drugmechdb_graph()
-
-    # Step 3a: Extract paths based on drugmechdb_path_id for treats edges (NEW METHOD)
-    path_id_results = extract_paths_by_path_id(path_id_map, treats_edges)
-
-    # Step 3b: Find mechanistic paths for each treats edge (OLD METHOD - kept for comparison)
-    results = find_all_mechanistic_paths(
-        treats_edges, edge_index, idx_to_node, node_to_idx, edge_attributes, max_length=5
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description='Find mechanistic paths from DrugMechDB for drug-disease treatment relationships',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Example usage:
+  python find_mechanistic_paths.py --edges_file /path/to/edges.jsonl.gz
+  python find_mechanistic_paths.py --edges_file edges.jsonl --max_length 5 --output_dir ./results/
+  python find_mechanistic_paths.py --edges_file edges.jsonl --run_old_method
+        """
     )
 
-    # Step 4: Summarize results
-    summarize_results(results)
+    parser.add_argument(
+        '--edges_file',
+        type=str,
+        default='roboedges.jsonl.gz',
+        help='Path to input edges JSONL file (can be gzipped). Default: roboedges.jsonl.gz'
+    )
 
-    # Step 5: Save results
-    save_results(results)
-    save_results_txt(results)
-    save_results_txt_deduplicated(results)
+    parser.add_argument(
+        '--max_length',
+        type=int,
+        default=5,
+        help='Maximum path length to search for mechanistic paths (only used with --run_old_method). Default: 5'
+    )
 
-    # Step 6: Save path_id-based results (NEW OUTPUT)
-    save_path_id_results(path_id_results)
+    parser.add_argument(
+        '--output_dir',
+        type=str,
+        default='.',
+        help='Directory to save output files. Default: current directory'
+    )
+
+    parser.add_argument(
+        '--run_old_method',
+        action='store_true',
+        help='Run old graph search method in addition to path_id method. This will generate additional output files.'
+    )
+
+    return parser.parse_args()
+
+def main(edges_file='roboedges.jsonl.gz', max_length=5, output_dir='.', run_old_method=False):
+    """Main function to extract and analyze mechanistic paths
+
+    Args:
+        edges_file: Path to input edges JSONL file
+        max_length: Maximum path length to search (only used if run_old_method is True)
+        output_dir: Directory to save output files
+        run_old_method: Whether to run the old graph search method
+    """
+    # Create output directory if it doesn't exist
+    if output_dir != '.' and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
+
+    print(f"\n{'='*70}")
+    print("FINDING MECHANISTIC PATHS FROM DRUGMECHDB")
+    print(f"{'='*70}")
+    print(f"Input file: {edges_file}")
+    print(f"Output directory: {output_dir}")
+    print(f"Run old method: {run_old_method}")
+    if run_old_method:
+        print(f"Max path length: {max_length}")
+    print(f"{'='*70}\n")
+
+    # Step 1: Extract all treats edges
+    treats_edges = extract_treats_edges(edges_file)
+
+    # Step 2: Build DrugMechDB graph and extract path_id information
+    edge_index, idx_to_node, edge_attributes, node_to_idx, path_id_map = build_drugmechdb_graph(edges_file)
+
+    # Step 3: Extract paths based on drugmechdb_path_id for treats edges
+    path_id_results = extract_paths_by_path_id(path_id_map, treats_edges)
+
+    # Step 4: Summarize path_id results
+    summarize_path_id_results(path_id_results)
+
+    # Step 5: Save path_id-based results
+    save_path_id_results(path_id_results, output_dir=output_dir)
+
+    # Optional: Run old method if requested
+    results = None
+    if run_old_method:
+        print(f"\n{'='*70}")
+        print("RUNNING OLD METHOD (graph search)")
+        print(f"{'='*70}\n")
+
+        # Find mechanistic paths for each treats edge (OLD METHOD)
+        results = find_all_mechanistic_paths(
+            treats_edges, edge_index, idx_to_node, node_to_idx, edge_attributes, max_length=max_length
+        )
+
+        # Summarize old method results
+        summarize_results(results)
+
+        # Save old method results
+        save_results(results, output_dir=output_dir)
+        save_results_txt(results, output_dir=output_dir)
+        save_results_txt_deduplicated(results, output_dir=output_dir)
 
     print(f"\n{'='*70}")
     print("COMPLETE!")
     print(f"{'='*70}")
 
-    return results, path_id_results
+    return path_id_results, results
 
 if __name__ == "__main__":
-    results = main()
+    args = parse_args()
+    path_id_results, results = main(
+        edges_file=args.edges_file,
+        max_length=args.max_length,
+        output_dir=args.output_dir,
+        run_old_method=args.run_old_method
+    )
