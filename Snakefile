@@ -180,11 +180,14 @@ rule filter_treats_with_drugmechdb:
 rule extract_drugmechdb_test:
     """
     Extract test edges from DrugMechDB-verified treats edges and remove them from rotorobo.txt
+    Note: Depends on dictionaries being generated (Step 1b) to ensure complete preprocessing
     """
     input:
         subgraph = f"{BASE_DIR}/rotorobo.txt",
         edge_map = f"{BASE_DIR}/edge_map.json",
-        filtered_tsv = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_treats_filtered.txt"
+        filtered_tsv = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_treats_filtered.txt",
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
     output:
         test = f"{BASE_DIR}/test.txt",
         train_candidates = f"{BASE_DIR}/train_candidates.txt",
