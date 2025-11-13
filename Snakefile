@@ -325,20 +325,19 @@ rule evaluate_model:
     This runs AFTER train.py completes and provides detailed scoring
     """
     input:
-        model_dir = f"{BASE_DIR}/models/conve",
+        # Ensure training is complete - depend on config.json which is created at the end
+        config_out = f"{BASE_DIR}/models/conve/config.json",
         test = f"{BASE_DIR}/test.txt",
         node_dict = f"{BASE_DIR}/processed/node_dict.txt",
         node_name_dict = f"{BASE_DIR}/processed/node_name_dict.txt",
-        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt",
-        # Ensure training is complete first
-        config_out = f"{BASE_DIR}/models/conve/config.json",
-        test_results = f"{BASE_DIR}/models/conve/test_results.json"
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
     output:
         scores_json = f"{BASE_DIR}/results/evaluation/test_scores.json",
         scores_csv = f"{BASE_DIR}/results/evaluation/test_scores.csv",
         scores_ranked_json = f"{BASE_DIR}/results/evaluation/test_scores_ranked.json",
         scores_ranked_csv = f"{BASE_DIR}/results/evaluation/test_scores_ranked.csv"
     params:
+        model_dir = f"{BASE_DIR}/models/conve",
         output_dir = f"{BASE_DIR}/results/evaluation",
         use_sigmoid = "--use-sigmoid" if config.get("use_sigmoid", False) else "",
         top_n_arg = f"--top-n {config.get('top_n_triples')}" if config.get("top_n_triples") else "",
@@ -350,7 +349,7 @@ rule evaluate_model:
         mkdir -p {params.output_dir}
 
         python score_only.py \
-            --model-dir {input.model_dir} \
+            --model-dir {params.model_dir} \
             --test {input.test} \
             --entity-to-id {input.node_dict} \
             --relation-to-id {input.rel_dict} \
