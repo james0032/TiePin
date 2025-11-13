@@ -93,7 +93,8 @@ rule prepare_dictionaries:
     """
     input:
         subgraph = f"{BASE_DIR}/rotorobo.txt",
-        edge_map = f"{BASE_DIR}/edge_map.json"
+        edge_map = f"{BASE_DIR}/edge_map.json",
+        nodes_file = config["node_file"]
     output:
         node_dict = f"{BASE_DIR}/processed/node_dict.txt",
         node_name_dict = f"{BASE_DIR}/processed/node_name_dict.txt",
@@ -108,6 +109,7 @@ rule prepare_dictionaries:
         python src/prepare_dict.py \
             --input {input.subgraph} \
             --edge-map {input.edge_map} \
+            --nodes-file {input.nodes_file} \
             --output-dir {params.output_dir} \
             2>&1 | tee {log}
         """
@@ -290,8 +292,8 @@ rule train_model:
             --train {input.train} \
             --valid {input.valid} \
             --test {input.test} \
-            --node-dict {input.node_dict} \
-            --rel-dict {input.rel_dict} \
+            --entity-to-id {input.node_dict} \
+            --relation-to-id {input.rel_dict} \
             --output-dir {params.output_dir} \
             --checkpoint-dir {params.checkpoint_dir} \
             --num-epochs {params.num_epochs} \
@@ -345,8 +347,8 @@ rule evaluate_model:
         python score_only.py \
             --model-dir {params.model_dir} \
             --test {input.test} \
-            --node-dict {input.node_dict} \
-            --rel-dict {input.rel_dict} \
+            --entity-to-id {input.node_dict} \
+            --relation-to-id {input.rel_dict} \
             --node-name-dict {input.node_name_dict} \
             --output {params.output} \
             {params.use_sigmoid} \
