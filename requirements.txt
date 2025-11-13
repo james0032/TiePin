@@ -16,5 +16,12 @@ tqdm>=4.62.0
 click>=8.0.0
 jsonlines
 
-#Visualization
+# Visualization
 seaborn
+
+# Graph analysis
+networkx>=2.6.0
+torch-geometric
+
+# Workflow management
+snakemake>=7.0.0

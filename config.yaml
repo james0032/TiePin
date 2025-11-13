@@ -1,0 +1,174 @@
+# ============================================================================
+# Snakemake Pipeline Configuration for ConvE PyKEEN
+# ============================================================================
+
+# ============================================================================
+# Input Data Configuration
+# ============================================================================
+
+# Path to the node JSONL file
+node_file: "robokop/nodes.jsonl"
+
+# Path to the edges JSONL file
+edges_file: "robokop/edges.jsonl"
+
+# Subgraph filtering style (determines output directory structure)
+# Valid options: original, CD, CCGGDD, CGGD, rCD, keepall, CGGD_alltreat
+# Output directory will be: robokop/{style}/
+style: "CGGD_alltreat"
+
+# ============================================================================
+# Mechanistic Paths Configuration
+# ============================================================================
+
+# Maximum path length for old method (only used if run_old_method is True)
+max_path_length: 8
+
+# Run the old graph search method in addition to path_id method
+run_old_method: false
+
+# ============================================================================
+# DrugMechDB Test Set Configuration
+# ============================================================================
+
+# Path to filtered TSV file with DrugMechDB-verified treats edges
+# This should be the output from add_pair_exists_column.py
+drugmechdb_filtered_tsv: "drugmechdb_treats_filtered.txt"
+
+# Percentage of filtered treats edges to use for test set (e.g., 0.10 for 10%)
+drugmechdb_test_pct: 0.20
+
+# ============================================================================
+# Data Splitting Configuration
+# ============================================================================
+
+# Ratio for train/valid/test split (must sum to <= 1.0)
+train_ratio: 0.999
+valid_ratio: 0.001
+# test_ratio is implicit: 1.0 - train_ratio - valid_ratio = 0.1
+
+# Random seed for reproducibility
+random_seed: 42
+
+# Validate entities and relations against dictionaries during preprocessing
+validate_data: true
+
+# ============================================================================
+# Model Architecture Configuration
+# ============================================================================
+
+# Embedding dimensions (embedding_dim must equal embedding_height * embedding_width)
+embedding_dim: 32
+embedding_height: 8
+embedding_width: 4
+
+# Convolutional layer parameters
+output_channels: 32
+kernel_height: 3
+kernel_width: 3
+
+# Dropout rates
+input_dropout: 0.2
+feature_map_dropout: 0.2
+output_dropout: 0.3
+
+# ============================================================================
+# Training Configuration
+# ============================================================================
+
+# Number of training epochs
+num_epochs: 20
+
+# Batch size for training
+batch_size: 32768
+
+# Learning rate (Adam optimizer)
+learning_rate: 0.001
+
+# Label smoothing (0.0 to disable, 0.1 recommended)
+# Helps prevent overconfident predictions
+label_smoothing: 0.1
+
+# Early stopping configuration
+early_stopping: true
+patience: 10
+
+# Use GPU for training (set to false for CPU-only)
+use_gpu: true
+
+# Checkpoint configuration (for train_pytorch.py)
+checkpoint_frequency: 2  # Save checkpoint every N epochs
+num_workers: 4  # Number of data loader workers
+
+# ============================================================================
+# Evaluation Configuration
+# ============================================================================
+
+# Use sigmoid to convert scores to probabilities [0, 1] (default: False, returns raw logits)
+use_sigmoid: true
+
+# Output top N highest scoring triples to a separate TSV file
+top_n_triples: null  # Set to null to disable
+
+# ============================================================================
+# TracIn Analysis Configuration
+# ============================================================================
+
+# Run TracIn analysis (computationally expensive)
+run_tracin: false
+
+# Number of TracIn batches (for parallel processing)
+tracin_batches: 1
+
+# Top-k most influential training examples to return
+tracin_top_k: 10
+
+# Maximum number of test triples to analyze (limit for performance)
+tracin_max_test_triples: 100
+
+# ============================================================================
+# Output Configuration
+# ============================================================================
+
+# All outputs will be organized under robokop/{style}/ directory:
+# - robokop/{style}/rotorobo.txt              : Subgraph triples
+# - robokop/{style}/edge_map.json             : Edge predicate mapping
+# - robokop/{style}/test.txt                  : DrugMechDB test edges
+# - robokop/{style}/train_candidates.txt      : Subgraph with test edges removed
+# - robokop/{style}/test_statistics.json      : Statistics about test set
+# - robokop/{style}/processed/                : Preprocessed data and dictionaries
+# - robokop/{style}/train.tsv|valid.tsv|test.tsv : Data splits
+# - robokop/{style}/models/conve/             : Trained model files
+#   - best_model.pt                           : Best model checkpoint (based on validation MRR)
+#   - final_model.pt                          : Final model after all epochs
+#   - config.json                             : Training configuration
+#   - test_results.json                       : Test set evaluation results
+#   - training_history.json                   : Training loss and validation metrics per epoch
+#   - checkpoints/                            : Intermediate checkpoints every N epochs
+# - robokop/{style}/results/mechanistic_paths/ : Mechanistic path results
+# - robokop/{style}/results/evaluation/       : Model evaluation results
+#   - test_scores.json                        : Test scores in original order (with entity names)
+#   - test_scores.csv                         : Test scores in CSV format
+#   - test_scores_ranked.json                 : Test scores ranked by score (descending)
+#   - test_scores_ranked.csv                  : Ranked scores in CSV format
+#   - test_scores_top{N}.txt                  : Top N triples in TSV format (if top_n_triples configured)
+# - robokop/{style}/results/tracin/           : TracIn analysis results
+# - robokop/{style}/logs/                     : Execution logs for each step
+#
+# Example: If style = "CGGD_alltreat", all outputs go to robokop/CGGD_alltreat/
+
+# ============================================================================
+# Advanced Configuration
+# ============================================================================
+
+# Negative sampling ratio (for training)
+negative_sample_ratio: 1
+
+# Evaluation batch size (can be larger than training batch)
+eval_batch_size: 512
+
+# Number of top predictions to save in evaluation
+top_k_predictions: 10
+
+# Filter evaluation (exclude training/validation triples)
+filter_evaluation: true
