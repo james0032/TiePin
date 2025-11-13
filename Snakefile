@@ -3,15 +3,14 @@ Snakemake pipeline for ConvE PyKEEN Knowledge Graph Embedding and TracIn Analysi
 
 This pipeline automates the complete workflow:
 1. Create ROBOKOP subgraph (with style-based filtering)
+1b. Prepare dictionary files
 2. Extract mechanistic paths from DrugMechDB
 2b. Filter treats edges with DrugMechDB paths (using add_pair_exists_column.py)
 3. Extract DrugMechDB test set
-4. Prepare dictionary files
-5. Split data into train/valid/test
-6. Preprocess data for PyKEEN
-7. Train ConvE model
-8. Evaluate model
-9. Run TracIn analysis
+4. Split data into train/valid
+5. Train ConvE model
+6. Evaluate model
+7. Run TracIn analysis
 
 Usage:
     snakemake --cores all
@@ -37,13 +36,12 @@ rule all:
         # DrugMechDB test set
         f"{BASE_DIR}/test.txt",
         f"{BASE_DIR}/train_candidates.txt",
+        # Train/valid split
+        f"{BASE_DIR}/train.txt",
+        f"{BASE_DIR}/valid.txt",
         # Dictionary files
         f"{BASE_DIR}/processed/node_dict.txt",
         f"{BASE_DIR}/processed/rel_dict.txt",
-        # Preprocessed data
-        f"{BASE_DIR}/processed/train.txt",
-        f"{BASE_DIR}/processed/valid.txt",
-        f"{BASE_DIR}/processed/test.txt",
         # Trained model
         f"{BASE_DIR}/models/conve/best_model.pt",
         f"{BASE_DIR}/models/conve/final_model.pt",
@@ -82,6 +80,35 @@ rule create_subgraph:
             --edges-file {input.edges_file} \
             --style {params.style} \
             --outdir {params.outdir} \
+            2>&1 | tee {log}
+        """
+
+# ============================================================================
+# Step 1b: Prepare Dictionary Files
+# ============================================================================
+
+rule prepare_dictionaries:
+    """
+    Generate node_dict and rel_dict from subgraph data
+    """
+    input:
+        subgraph = f"{BASE_DIR}/rotorobo.txt",
+        edge_map = f"{BASE_DIR}/edge_map.json"
+    output:
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
+        node_name_dict = f"{BASE_DIR}/processed/node_name_dict.txt",
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt",
+        stats = f"{BASE_DIR}/processed/graph_stats.txt"
+    params:
+        output_dir = f"{BASE_DIR}/processed"
+    log:
+        f"{BASE_DIR}/logs/prepare_dictionaries.log"
+    shell:
+        """
+        python src/prepare_dict.py \
+            --input {input.subgraph} \
+            --edge-map {input.edge_map} \
+            --output-dir {params.output_dir} \
             2>&1 | tee {log}
         """
 
@@ -180,36 +207,7 @@ rule extract_drugmechdb_test:
         """
 
 # ============================================================================
-# Step 4: Prepare Dictionary Files
-# ============================================================================
-
-rule prepare_dictionaries:
-    """
-    Generate node_dict and rel_dict from subgraph data
-    """
-    input:
-        subgraph = f"{BASE_DIR}/rotorobo.txt",
-        edge_map = f"{BASE_DIR}/edge_map.json"
-    output:
-        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
-        node_name_dict = f"{BASE_DIR}/processed/node_name_dict.txt",
-        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt",
-        stats = f"{BASE_DIR}/processed/graph_stats.txt"
-    params:
-        output_dir = f"{BASE_DIR}/processed"
-    log:
-        f"{BASE_DIR}/logs/prepare_dictionaries.log"
-    shell:
-        """
-        python src/prepare_dict.py \
-            --input {input.subgraph} \
-            --edge-map {input.edge_map} \
-            --output-dir {params.output_dir} \
-            2>&1 | tee {log}
-        """
-
-# ============================================================================
-# Step 5: Split Data into Train/Valid/Test
+# Step 4: Split Data into Train/Valid
 # ============================================================================
 
 rule split_data:
@@ -240,47 +238,7 @@ rule split_data:
         """
 
 # ============================================================================
-# Step 6: Preprocess Data for PyKEEN
-# ============================================================================
-
-rule preprocess_data:
-    """
-    Convert data to PyKEEN format while preserving dictionary indices
-    """
-    input:
-        train = f"{BASE_DIR}/train.txt",
-        valid = f"{BASE_DIR}/valid.txt",
-        test = f"{BASE_DIR}/test.txt",
-        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
-        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt",
-        edge_map = f"{BASE_DIR}/edge_map.json"
-    output:
-        train_out = f"{BASE_DIR}/processed/train.txt",
-        valid_out = f"{BASE_DIR}/processed/valid.txt",
-        test_out = f"{BASE_DIR}/processed/test.txt",
-        entity_map = f"{BASE_DIR}/processed/train_entity_to_id.tsv",
-        relation_map = f"{BASE_DIR}/processed/train_relation_to_id.tsv"
-    params:
-        output_dir = f"{BASE_DIR}/processed",
-        validate = "" if config.get("validate_data", True) else "--no-validate"
-    log:
-        f"{BASE_DIR}/logs/preprocess_data.log"
-    shell:
-        """
-        python preprocess.py \
-            --train {input.train} \
-            --valid {input.valid} \
-            --test {input.test} \
-            --node-dict {input.node_dict} \
-            --rel-dict {input.rel_dict} \
-            --edge-map {input.edge_map} \
-            --output-dir {params.output_dir} \
-            {params.validate} \
-            2>&1 | tee {log}
-        """
-
-# ============================================================================
-# Step 7: Train ConvE Model
+# Step 5: Train ConvE Model
 # ============================================================================
 
 rule train_model:
@@ -288,11 +246,11 @@ rule train_model:
     Train ConvE knowledge graph embedding model using pure PyTorch
     """
     input:
-        train = f"{BASE_DIR}/processed/train.txt",
-        valid = f"{BASE_DIR}/processed/valid.txt",
-        test = f"{BASE_DIR}/processed/test.txt",
-        entity_map = f"{BASE_DIR}/processed/train_entity_to_id.tsv",
-        relation_map = f"{BASE_DIR}/processed/train_relation_to_id.tsv"
+        train = f"{BASE_DIR}/train.txt",
+        valid = f"{BASE_DIR}/valid.txt",
+        test = f"{BASE_DIR}/test.txt",
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
     output:
         best_model = f"{BASE_DIR}/models/conve/best_model.pt",
         final_model = f"{BASE_DIR}/models/conve/final_model.pt",
@@ -329,8 +287,8 @@ rule train_model:
             --train {input.train} \
             --valid {input.valid} \
             --test {input.test} \
-            --entity-to-id {input.entity_map} \
-            --relation-to-id {input.relation_map} \
+            --node-dict {input.node_dict} \
+            --rel-dict {input.rel_dict} \
             --output-dir {params.output_dir} \
             --checkpoint-dir {params.checkpoint_dir} \
             --num-epochs {params.num_epochs} \
@@ -354,7 +312,7 @@ rule train_model:
         """
 
 # ============================================================================
-# Step 8: Evaluate Model
+# Step 6: Evaluate Model
 # ============================================================================
 
 rule evaluate_model:
@@ -363,9 +321,9 @@ rule evaluate_model:
     """
     input:
         best_model = f"{BASE_DIR}/models/conve/best_model.pt",
-        test = f"{BASE_DIR}/processed/test.txt",
-        entity_map = f"{BASE_DIR}/processed/train_entity_to_id.tsv",
-        relation_map = f"{BASE_DIR}/processed/train_relation_to_id.tsv",
+        test = f"{BASE_DIR}/test.txt",
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt",
         node_name_dict = f"{BASE_DIR}/processed/node_name_dict.txt"
     output:
         scores_json = f"{BASE_DIR}/results/evaluation/test_scores.json",
@@ -384,8 +342,8 @@ rule evaluate_model:
         python score_only.py \
             --model-dir {params.model_dir} \
             --test {input.test} \
-            --entity-to-id {input.entity_map} \
-            --relation-to-id {input.relation_map} \
+            --node-dict {input.node_dict} \
+            --rel-dict {input.rel_dict} \
             --node-name-dict {input.node_name_dict} \
             --output {params.output} \
             {params.use_sigmoid} \
@@ -394,7 +352,7 @@ rule evaluate_model:
         """
 
 # ============================================================================
-# Step 9: TracIn Analysis (Optional)
+# Step 7: TracIn Analysis (Optional)
 # ============================================================================
 
 rule tracin_analysis:
@@ -403,7 +361,7 @@ rule tracin_analysis:
     """
     input:
         best_model = f"{BASE_DIR}/models/conve/best_model.pt",
-        test = f"{BASE_DIR}/processed/test.txt"
+        test = f"{BASE_DIR}/test.txt"
     output:
         analysis = f"{BASE_DIR}/results/tracin/tracin_analysis_{{batch}}.json"
     params:

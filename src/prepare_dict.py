@@ -349,7 +349,8 @@ def analyze_graph_statistics(
     triples_path: str,
     node_dict: Dict[str, int],
     rel_dict: Dict[str, int],
-    edge_map: Dict[str, str] = None
+    edge_map: Dict[str, str] = None,
+    output_file: str = None
 ):
     """Analyze and log graph statistics.
 
@@ -358,6 +359,7 @@ def analyze_graph_statistics(
         node_dict: Entity to index mapping
         rel_dict: Relation to index mapping
         edge_map: Optional edge map
+        output_file: Optional path to save statistics to file
     """
     logger.info("Analyzing graph statistics...")
 
@@ -383,6 +385,44 @@ def analyze_graph_statistics(
     total_triples = sum(relation_counter.values())
     avg_degree = total_triples / len(node_dict) if node_dict else 0
 
+    # Prepare statistics lines
+    stats_lines = []
+    stats_lines.append("=" * 80)
+    stats_lines.append("Graph Statistics:")
+    stats_lines.append("=" * 80)
+    stats_lines.append(f"Total entities: {len(node_dict)}")
+    stats_lines.append(f"Total relations: {len(rel_dict)}")
+    stats_lines.append(f"Total triples: {total_triples}")
+    stats_lines.append(f"Average degree per entity: {avg_degree:.2f}")
+
+    # Entity statistics
+    if subject_counter:
+        max_out_entity = subject_counter.most_common(1)[0]
+        stats_lines.append(f"Max out-degree entity: {max_out_entity[0]} ({max_out_entity[1]} edges)")
+
+    if object_counter:
+        max_in_entity = object_counter.most_common(1)[0]
+        stats_lines.append(f"Max in-degree entity: {max_in_entity[0]} ({max_in_entity[1]} edges)")
+
+    # Relation statistics
+    stats_lines.append("\nTop 10 most frequent relations:")
+    for relation, count in relation_counter.most_common(10):
+        percentage = (count / total_triples) * 100
+        stats_lines.append(f"  {relation}: {count} ({percentage:.2f}%)")
+
+    # Edge map statistics
+    if edge_map:
+        stats_lines.append(f"\nEdge map contains {len(edge_map)} predicate mappings")
+        # Show sample of edge map
+        stats_lines.append("Sample edge mappings:")
+        for i, (detailed_pred, simple_pred) in enumerate(edge_map.items()):
+            if i >= 5:
+                break
+            stats_lines.append(f"  {simple_pred} <- {detailed_pred}")
+
+    stats_lines.append("=" * 80)
+
+    # Log to console
     logger.info("=" * 80)
     logger.info("Graph Statistics:")
     logger.info("=" * 80)
@@ -391,7 +431,6 @@ def analyze_graph_statistics(
     logger.info(f"Total triples: {total_triples}")
     logger.info(f"Average degree per entity: {avg_degree:.2f}")
 
-    # Entity statistics
     if subject_counter:
         max_out_entity = subject_counter.most_common(1)[0]
         logger.info(f"Max out-degree entity: {max_out_entity[0]} ({max_out_entity[1]} edges)")
@@ -400,16 +439,13 @@ def analyze_graph_statistics(
         max_in_entity = object_counter.most_common(1)[0]
         logger.info(f"Max in-degree entity: {max_in_entity[0]} ({max_in_entity[1]} edges)")
 
-    # Relation statistics
     logger.info("\nTop 10 most frequent relations:")
     for relation, count in relation_counter.most_common(10):
         percentage = (count / total_triples) * 100
         logger.info(f"  {relation}: {count} ({percentage:.2f}%)")
 
-    # Edge map statistics
     if edge_map:
         logger.info(f"\nEdge map contains {len(edge_map)} predicate mappings")
-        # Show sample of edge map
         logger.info("Sample edge mappings:")
         for i, (detailed_pred, simple_pred) in enumerate(edge_map.items()):
             if i >= 5:
@@ -417,6 +453,13 @@ def analyze_graph_statistics(
             logger.info(f"  {simple_pred} <- {detailed_pred}")
 
     logger.info("=" * 80)
+
+    # Save to file if requested
+    if output_file:
+        logger.info(f"\nSaving statistics to {output_file}")
+        with open(output_file, 'w') as f:
+            f.write('\n'.join(stats_lines))
+        logger.info(f"✓ Statistics saved to {output_file}")
 
 
 def parse_arguments():
@@ -624,13 +667,16 @@ def main():
 
         # Analyze statistics
         if not args.skip_stats:
-            analyze_graph_statistics(triples_file, node_dict, rel_dict, edge_map)
+            stats_output_path = os.path.join(output_dir, 'graph_stats.txt')
+            analyze_graph_statistics(triples_file, node_dict, rel_dict, edge_map, stats_output_path)
 
         logger.info("\n" + "=" * 80)
         logger.info("Dictionary preparation complete!")
         logger.info(f"  Node dictionary (ID to index): {node_dict_path}")
         logger.info(f"  Node name dictionary (name to index): {node_name_dict_path}")
         logger.info(f"  Relation dictionary: {rel_dict_path}")
+        if not args.skip_stats:
+            logger.info(f"  Graph statistics: {stats_output_path}")
         logger.info("=" * 80)
 
         return 0
