@@ -44,9 +44,12 @@ rule all:
         f"{BASE_DIR}/processed/rel_dict.txt",
         # Trained model (PyKEEN outputs)
         f"{BASE_DIR}/models/conve/config.json",
-        f"{BASE_DIR}/models/conve/test_results.json"
-        # Note: Evaluation and TracIn analysis are disabled when using train.py (PyKEEN)
-        # To enable these features, use train_pytorch.py instead
+        f"{BASE_DIR}/models/conve/test_results.json",
+        # Evaluation results (score_only.py outputs)
+        f"{BASE_DIR}/results/evaluation/test_scores.json",
+        f"{BASE_DIR}/results/evaluation/test_scores_ranked.json"
+        # Note: TracIn analysis is disabled when using train.py (PyKEEN)
+        # To enable TracIn, use train_pytorch.py instead
 
 # ============================================================================
 # Step 1: Create ROBOKOP Subgraph
@@ -313,13 +316,51 @@ rule train_model:
         """
 
 # ============================================================================
-# Step 6: Evaluate Model (DISABLED - now integrated into train.py)
+# Step 6: Evaluate Model (Score Test Triples)
 # ============================================================================
-# NOTE: PyKEEN's train.py performs evaluation automatically and saves results
-# to test_results.json. The separate evaluate_model rule is no longer needed.
-#
-# If you need score_only.py functionality, you can use train_pytorch.py instead
-# of train.py, which uses the pure PyTorch implementation.
+
+rule evaluate_model:
+    """
+    Score test triples using trained ConvE model with score_only.py
+    This runs AFTER train.py completes and provides detailed scoring
+    """
+    input:
+        model_dir = f"{BASE_DIR}/models/conve",
+        test = f"{BASE_DIR}/test.txt",
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
+        node_name_dict = f"{BASE_DIR}/processed/node_name_dict.txt",
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt",
+        # Ensure training is complete first
+        config_out = f"{BASE_DIR}/models/conve/config.json",
+        test_results = f"{BASE_DIR}/models/conve/test_results.json"
+    output:
+        scores_json = f"{BASE_DIR}/results/evaluation/test_scores.json",
+        scores_csv = f"{BASE_DIR}/results/evaluation/test_scores.csv",
+        scores_ranked_json = f"{BASE_DIR}/results/evaluation/test_scores_ranked.json",
+        scores_ranked_csv = f"{BASE_DIR}/results/evaluation/test_scores_ranked.csv"
+    params:
+        output_dir = f"{BASE_DIR}/results/evaluation",
+        use_sigmoid = "--use-sigmoid" if config.get("use_sigmoid", False) else "",
+        top_n_arg = f"--top-n {config.get('top_n_triples')}" if config.get("top_n_triples") else "",
+        device = "cuda" if config.get("use_gpu", True) else "cpu"
+    log:
+        f"{BASE_DIR}/logs/evaluate_model.log"
+    shell:
+        """
+        mkdir -p {params.output_dir}
+
+        python score_only.py \
+            --model-dir {input.model_dir} \
+            --test {input.test} \
+            --entity-to-id {input.node_dict} \
+            --relation-to-id {input.rel_dict} \
+            --node-name-dict {input.node_name_dict} \
+            --output {output.scores_json} \
+            --device {params.device} \
+            {params.use_sigmoid} \
+            {params.top_n_arg} \
+            2>&1 | tee {log}
+        """
 
 # ============================================================================
 # Step 7: TracIn Analysis (DISABLED - requires train_pytorch.py outputs)
