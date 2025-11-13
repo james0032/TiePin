@@ -32,13 +32,18 @@ OUTPUT FILES:
    - Format: Drug,Disease,Intermediate_Nodes,drugmechdb_path_id
    - Each row represents one pre-defined DrugMechDB path connecting a drug-disease pair
 
-2. treats_mechanistic_paths.json (OLD METHOD - for reference)
+2. treats.txt (NEW METHOD - for use with add_pair_exists_column.py)
+   - Format: Drug\tPredicate\tDisease (tab-separated, rotorobo.txt format)
+   - All biolink:treats edges extracted from the input file
+   - Can be used as input to add_pair_exists_column.py
+
+3. treats_mechanistic_paths.json (OLD METHOD - for reference)
    - Full JSON output with all mechanistic paths found via graph search
 
-3. treats_mechanistic_paths.txt (OLD METHOD)
+4. treats_mechanistic_paths.txt (OLD METHOD)
    - Text format with one row per path found
 
-4. dedup_treats_mechanistic_paths.txt (OLD METHOD)
+5. dedup_treats_mechanistic_paths.txt (OLD METHOD)
    - Deduplicated drug-disease pairs with all intermediate nodes merged
 
 COMMAND LINE ARGUMENTS:
@@ -586,6 +591,32 @@ def save_path_id_results(results, output_txt='drugmechdb_path_id_results.txt', o
     print(f"  Total paths: {len(results)}")
     print(f"  Paths with intermediate nodes: {sum(1 for r in results if r['intermediate_nodes'])}")
 
+def save_treats_edges_tsv(treats_edges, output_tsv='treats.txt', output_dir='.'):
+    """Save treats edges in rotorobo.txt format (tab-separated).
+
+    Format: subject\tpredicate\tobject
+    This matches the format of rotorobo.txt for use with add_pair_exists_column.py
+    """
+    output_path = os.path.join(output_dir, output_tsv)
+    print(f"\n{'='*70}")
+    print(f"Saving treats edges to {output_path} (rotorobo.txt format)...")
+
+    with open(output_path, 'w') as f:
+        # Write header (optional, matches typical TSV format)
+        f.write("Drug\tPredicate\tDisease\n")
+
+        # Write each treats edge as tab-separated values
+        for edge in treats_edges:
+            drug = edge['subject']
+            disease = edge['object']
+            predicate = 'biolink:treats'
+            f.write(f"{drug}\t{predicate}\t{disease}\n")
+
+    file_size_kb = os.path.getsize(output_path) / 1024
+
+    print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB)")
+    print(f"  Total treats edges: {len(treats_edges)}")
+
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
@@ -666,6 +697,9 @@ def main(edges_file='roboedges.jsonl.gz', max_length=5, output_dir='.', run_old_
 
     # Step 5: Save path_id-based results
     save_path_id_results(path_id_results, output_dir=output_dir)
+
+    # Step 6: Save treats edges in rotorobo.txt format
+    save_treats_edges_tsv(treats_edges, output_dir=output_dir)
 
     # Optional: Run old method if requested
     results = None

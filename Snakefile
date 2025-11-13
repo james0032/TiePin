@@ -4,6 +4,7 @@ Snakemake pipeline for ConvE PyKEEN Knowledge Graph Embedding and TracIn Analysi
 This pipeline automates the complete workflow:
 1. Create ROBOKOP subgraph (with style-based filtering)
 2. Extract mechanistic paths from DrugMechDB
+2b. Filter treats edges with DrugMechDB paths (using add_pair_exists_column.py)
 3. Extract DrugMechDB test set
 4. Prepare dictionary files
 5. Split data into train/valid/test
@@ -96,6 +97,7 @@ rule extract_mechanistic_paths:
         edges_file = config["edges_file"]
     output:
         path_results = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_path_id_results.txt",
+        treats_tsv = f"{BASE_DIR}/results/mechanistic_paths/treats.txt",
         json_results = f"{BASE_DIR}/results/mechanistic_paths/treats_mechanistic_paths.json" if config.get("run_old_method", False) else []
     params:
         output_dir = f"{BASE_DIR}/results/mechanistic_paths",
@@ -114,6 +116,35 @@ rule extract_mechanistic_paths:
         """
 
 # ============================================================================
+# Step 2b: Filter Treats Edges with DrugMechDB Paths
+# ============================================================================
+
+rule filter_treats_with_drugmechdb:
+    """
+    Filter treats edges to only include those with DrugMechDB mechanistic paths
+    Uses add_pair_exists_column.py to cross-reference treats.txt with drugmechdb_path_id_results.txt
+    """
+    input:
+        path_results_txt = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_path_id_results.txt",
+        treats_tsv = f"{BASE_DIR}/results/mechanistic_paths/treats.txt"
+    output:
+        filtered_tsv = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_treats_filtered.txt",
+        annotated_csv = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_path_id_results_annotated.csv",
+        annotated_tsv = f"{BASE_DIR}/results/mechanistic_paths/treats_annotated.txt"
+    log:
+        f"{BASE_DIR}/logs/filter_treats_with_drugmechdb.log"
+    shell:
+        """
+        python utils/add_pair_exists_column.py \
+            {input.path_results_txt} \
+            {input.treats_tsv} \
+            {output.annotated_csv} \
+            {output.annotated_tsv} \
+            {output.filtered_tsv} \
+            2>&1 | tee {log}
+        """
+
+# ============================================================================
 # Step 3: Extract DrugMechDB Test Set
 # ============================================================================
 
@@ -124,7 +155,7 @@ rule extract_drugmechdb_test:
     input:
         subgraph = f"{BASE_DIR}/rotorobo.txt",
         edge_map = f"{BASE_DIR}/edge_map.json",
-        filtered_tsv = config["drugmechdb_filtered_tsv"]
+        filtered_tsv = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_treats_filtered.txt"
     output:
         test = f"{BASE_DIR}/test.txt",
         train_candidates = f"{BASE_DIR}/train_candidates.txt",
