@@ -136,9 +136,11 @@ tracin_max_test_triples: 100
 # - /workspace/data/robokop/{style}/edge_map.json             : Edge predicate mapping
 # - /workspace/data/robokop/{style}/test.txt                  : DrugMechDB test edges
 # - /workspace/data/robokop/{style}/train_candidates.txt      : Subgraph with test edges removed
-# - /workspace/data/robokop/{style}/test_statistics.json      : Statistics about test set
+# - /workspace/data/robokop/{style}/test_statistics.json      : Statistics about test set (from Step 3)
+# - /workspace/data/robokop/{style}/train.txt                 : Training edges (from Step 5)
+# - /workspace/data/robokop/{style}/valid.txt                 : Validation edges (from Step 5)
+# - /workspace/data/robokop/{style}/split_statistics.json     : Split statistics (from Step 5)
 # - /workspace/data/robokop/{style}/processed/                : Preprocessed data and dictionaries
-# - /workspace/data/robokop/{style}/train.tsv|valid.tsv|test.tsv : Data splits
 # - /workspace/data/robokop/{style}/models/conve/             : Trained model files
 #   - best_model.pt                           : Best model checkpoint (based on validation MRR)
 #   - final_model.pt                          : Final model after all epochs

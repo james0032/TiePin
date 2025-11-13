@@ -438,29 +438,39 @@ Output files:
   - rel_dict.txt: Relation to index mapping (relation\tindex)
 
 Examples:
-  # Basic usage with default input directory
-  python prepare_dict.py --input-dir robokop/CGGD_alltreat
+  # Basic usage (recommended) - edge_map.json auto-detected in same directory
+  python prepare_dict.py --input /path/to/rotorobo.txt --output-dir output/processed
 
-  # Specify custom input and output paths
-  python prepare_dict.py --triples-file data/rotorobo.txt --output-dir output/dicts
+  # With explicit edge map
+  python prepare_dict.py --input data/rotorobo.txt --edge-map data/edge_map.json --output-dir output/dicts
 
-  # With edge map and debug logging
-  python prepare_dict.py --input-dir robokop/CGGD_alltreat --edge-map robokop/CGGD_alltreat/edge_map.json --log-level DEBUG
+  # Legacy usage with input directory
+  python prepare_dict.py --input-dir robokop/CGGD_alltreat --output-dir robokop/CGGD_alltreat/processed
+
+  # With debug logging
+  python prepare_dict.py --input /path/to/rotorobo.txt --log-level DEBUG
         """
+    )
+
+    parser.add_argument(
+        '--input',
+        type=str,
+        default=None,
+        help='Path to rotorobo.txt file (primary input)'
     )
 
     parser.add_argument(
         '--input-dir',
         type=str,
         default=None,
-        help='Input directory containing rotorobo.txt and edge_map.json (default: robokop/CGGD_alltreat)'
+        help='Input directory containing rotorobo.txt and edge_map.json (deprecated, use --input instead)'
     )
 
     parser.add_argument(
         '--triples-file',
         type=str,
         default=None,
-        help='Path to rotorobo.txt file (overrides --input-dir)'
+        help='Path to rotorobo.txt file (deprecated, use --input instead)'
     )
 
     parser.add_argument(
@@ -526,25 +536,27 @@ def main():
     logger.info(f"Working directory: {os.getcwd()}")
 
     try:
-        # Determine input directory and files
-        if args.input_dir:
-            input_dir = args.input_dir
+        # Determine triples file path (priority: --input > --triples-file > --input-dir)
+        if args.input:
+            triples_file = args.input
+            # Infer input_dir from the triples file directory
+            input_dir = os.path.dirname(triples_file) if os.path.dirname(triples_file) else '.'
         elif args.triples_file:
-            input_dir = os.path.dirname(args.triples_file)
+            triples_file = args.triples_file
+            input_dir = os.path.dirname(args.triples_file) if os.path.dirname(args.triples_file) else '.'
+        elif args.input_dir:
+            input_dir = args.input_dir
+            triples_file = os.path.join(input_dir, 'rotorobo.txt')
         else:
             input_dir = 'robokop/CGGD_alltreat'
-            logger.info(f"No input directory specified, using default: {input_dir}")
-
-        # Determine triples file path
-        if args.triples_file:
-            triples_file = args.triples_file
-        else:
             triples_file = os.path.join(input_dir, 'rotorobo.txt')
+            logger.info(f"No input specified, using default: {triples_file}")
 
-        # Determine edge map path
+        # Determine edge map path (auto-detect in same directory if not specified)
         if args.edge_map:
             edge_map_file = args.edge_map
         else:
+            # Auto-detect edge_map.json in the same directory as rotorobo.txt
             edge_map_file = os.path.join(input_dir, 'edge_map.json')
 
         # Determine nodes file path

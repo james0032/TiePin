@@ -188,7 +188,7 @@ rule prepare_dictionaries:
     Generate node_dict and rel_dict from subgraph data
     """
     input:
-        subgraph = f"{BASE_DIR}",
+        subgraph = f"{BASE_DIR}/rotorobo.txt",
         edge_map = f"{BASE_DIR}/edge_map.json"
     output:
         node_dict = f"{BASE_DIR}/processed/node_dict.txt",
@@ -214,27 +214,28 @@ rule prepare_dictionaries:
 
 rule split_data:
     """
-    Split the graph data into training, validation, and test sets
+    Split train_candidates into training and validation sets
+    Note: test.txt is already created in Step 3
     """
     input:
-        subgraph = f"{BASE_DIR}/rotorobo.txt"
+        train_candidates = f"{BASE_DIR}/train_candidates.txt"
     output:
-        train = f"{BASE_DIR}/train.tsv",
-        valid = f"{BASE_DIR}/valid.tsv",
-        test = f"{BASE_DIR}/test.tsv"
+        train = f"{BASE_DIR}/train.txt",
+        valid = f"{BASE_DIR}/valid.txt",
+        stats = f"{BASE_DIR}/split_statistics.json"
     params:
-        train_ratio = config.get("train_ratio", 0.8),
-        valid_ratio = config.get("valid_ratio", 0.1),
+        output_dir = BASE_DIR,
+        train_ratio = config.get("train_ratio", 0.9),
         seed = config.get("random_seed", 42)
     log:
         f"{BASE_DIR}/logs/split_data.log"
     shell:
         """
         python src/train_valid_split.py \
-            --input {input.subgraph} \
+            --input {input.train_candidates} \
+            --output-dir {params.output_dir} \
             --train-ratio {params.train_ratio} \
-            --valid-ratio {params.valid_ratio} \
-            --random-seed {params.seed} \
+            --seed {params.seed} \
             2>&1 | tee {log}
         """
 
@@ -247,9 +248,9 @@ rule preprocess_data:
     Convert data to PyKEEN format while preserving dictionary indices
     """
     input:
-        train = f"{BASE_DIR}/train.tsv",
-        valid = f"{BASE_DIR}/valid.tsv",
-        test = f"{BASE_DIR}/test.tsv",
+        train = f"{BASE_DIR}/train.txt",
+        valid = f"{BASE_DIR}/valid.txt",
+        test = f"{BASE_DIR}/test.txt",
         node_dict = f"{BASE_DIR}/processed/node_dict.txt",
         rel_dict = f"{BASE_DIR}/processed/rel_dict.txt",
         edge_map = f"{BASE_DIR}/edge_map.json"
