@@ -92,9 +92,11 @@ rule create_subgraph:
 rule extract_mechanistic_paths:
     """
     Extract drug-disease mechanistic paths from DrugMechDB using path_id
+    Note: Depends on Step 1 completing first to ensure sequential execution
     """
     input:
-        edges_file = config["edges_file"]
+        edges_file = config["edges_file"],
+        subgraph = f"{BASE_DIR}/rotorobo.txt"  # Wait for Step 1 to complete
     output:
         path_results = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_path_id_results.txt",
         treats_tsv = f"{BASE_DIR}/results/mechanistic_paths/treats.txt",
@@ -186,7 +188,7 @@ rule prepare_dictionaries:
     Generate node_dict and rel_dict from subgraph data
     """
     input:
-        subgraph = f"{BASE_DIR}/rotorobo.txt",
+        subgraph = f"{BASE_DIR}",
         edge_map = f"{BASE_DIR}/edge_map.json"
     output:
         node_dict = f"{BASE_DIR}/processed/node_dict.txt",
