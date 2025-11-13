@@ -42,11 +42,16 @@ rule all:
         # Dictionary files
         f"{BASE_DIR}/processed/node_dict.txt",
         f"{BASE_DIR}/processed/rel_dict.txt",
-        # Trained model (PyKEEN outputs)
-        f"{BASE_DIR}/models/conve/config.json",
-        f"{BASE_DIR}/models/conve/test_results.json"
-        # Note: Evaluation and TracIn analysis are disabled when using train.py (PyKEEN)
-        # To enable these features, use train_pytorch.py instead
+        # Trained model
+        f"{BASE_DIR}/models/conve/best_model.pt",
+        f"{BASE_DIR}/models/conve/final_model.pt",
+        f"{BASE_DIR}/models/conve/test_results.json",
+        # Evaluation results (score_only.py outputs)
+        f"{BASE_DIR}/results/evaluation/test_scores.json",
+        f"{BASE_DIR}/results/evaluation/test_scores_ranked.json",
+        # TracIn analysis (optional)
+        expand(f"{BASE_DIR}/results/tracin/tracin_analysis_{{batch}}.json",
+               batch=range(config.get("tracin_batches", 1))) if config.get("run_tracin", False) else []
 
 # ============================================================================
 # Step 1: Create ROBOKOP Subgraph
@@ -243,7 +248,7 @@ rule split_data:
 
 rule train_model:
     """
-    Train ConvE knowledge graph embedding model using PyKEEN
+    Train ConvE knowledge graph embedding model using pure PyTorch
     """
     input:
         train = f"{BASE_DIR}/train.txt",
@@ -252,12 +257,14 @@ rule train_model:
         node_dict = f"{BASE_DIR}/processed/node_dict.txt",
         rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
     output:
-        # PyKEEN outputs - model is saved in directory structure
-        model_dir = directory(f"{BASE_DIR}/models/conve"),
+        best_model = f"{BASE_DIR}/models/conve/best_model.pt",
+        final_model = f"{BASE_DIR}/models/conve/final_model.pt",
         config_out = f"{BASE_DIR}/models/conve/config.json",
-        test_results = f"{BASE_DIR}/models/conve/test_results.json"
+        test_results = f"{BASE_DIR}/models/conve/test_results.json",
+        training_history = f"{BASE_DIR}/models/conve/training_history.json"
     params:
         output_dir = f"{BASE_DIR}/models/conve",
+        checkpoint_dir = f"{BASE_DIR}/models/conve/checkpoints",
         num_epochs = config.get("num_epochs", 100),
         batch_size = config.get("batch_size", 256),
         learning_rate = config.get("learning_rate", 0.001),
@@ -272,24 +279,23 @@ rule train_model:
         output_dropout = config.get("output_dropout", 0.3),
         label_smoothing = config.get("label_smoothing", 0.1),
         checkpoint_frequency = config.get("checkpoint_frequency", 2),
-        patience = config.get("patience", 10),
+        num_workers = config.get("num_workers", 4),
         random_seed = config.get("random_seed", 42),
-        no_early_stopping = "" if config.get("early_stopping", True) else "--no-early-stopping",
-        gpu = "" if config.get("use_gpu", True) else "--no-gpu",
-        checkpoint_dir_arg = f"--checkpoint-dir {config.get('checkpoint_dir')}" if config.get("checkpoint_dir") else ""
+        gpu = "" if config.get("use_gpu", True) else "--no-gpu"
     log:
         f"{BASE_DIR}/logs/train_model.log"
     resources:
         gpu = 1 if config.get("use_gpu", True) else 0
     shell:
         """
-        python train.py \
+        python train_pytorch.py \
             --train {input.train} \
             --valid {input.valid} \
             --test {input.test} \
             --entity-to-id {input.node_dict} \
             --relation-to-id {input.rel_dict} \
             --output-dir {params.output_dir} \
+            --checkpoint-dir {params.checkpoint_dir} \
             --num-epochs {params.num_epochs} \
             --batch-size {params.batch_size} \
             --learning-rate {params.learning_rate} \
@@ -304,29 +310,87 @@ rule train_model:
             --output-dropout {params.output_dropout} \
             --label-smoothing {params.label_smoothing} \
             --checkpoint-frequency {params.checkpoint_frequency} \
-            --patience {params.patience} \
+            --num-workers {params.num_workers} \
             --random-seed {params.random_seed} \
-            {params.checkpoint_dir_arg} \
-            {params.no_early_stopping} \
             {params.gpu} \
             2>&1 | tee {log}
         """
 
 # ============================================================================
-# Step 6: Evaluate Model (DISABLED - now integrated into train.py)
+# Step 6: Evaluate Model
 # ============================================================================
-# NOTE: PyKEEN's train.py performs evaluation automatically and saves results
-# to test_results.json. The separate evaluate_model rule is no longer needed.
-#
-# If you need score_only.py functionality, you can use train_pytorch.py instead
-# of train.py, which uses the pure PyTorch implementation.
+
+rule evaluate_model:
+    """
+    Score test triples with ConvE model (without computing rankings)
+    """
+    input:
+        best_model = f"{BASE_DIR}/models/conve/best_model.pt",
+        test = f"{BASE_DIR}/test.txt",
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt",
+        node_name_dict = f"{BASE_DIR}/processed/node_name_dict.txt"
+    output:
+        scores_json = f"{BASE_DIR}/results/evaluation/test_scores.json",
+        scores_csv = f"{BASE_DIR}/results/evaluation/test_scores.csv",
+        ranked_json = f"{BASE_DIR}/results/evaluation/test_scores_ranked.json",
+        ranked_csv = f"{BASE_DIR}/results/evaluation/test_scores_ranked.csv"
+    params:
+        model_dir = f"{BASE_DIR}/models/conve",
+        output = f"{BASE_DIR}/results/evaluation/test_scores.json",
+        use_sigmoid = "--use-sigmoid" if config.get("use_sigmoid", False) else "",
+        top_n = lambda wildcards: f"--top-n {config.get('top_n_triples')}" if config.get('top_n_triples') else ""
+    log:
+        f"{BASE_DIR}/logs/evaluate_model.log"
+    shell:
+        """
+        python score_only.py \
+            --model-dir {params.model_dir} \
+            --test {input.test} \
+            --entity-to-id {input.node_dict} \
+            --relation-to-id {input.rel_dict} \
+            --node-name-dict {input.node_name_dict} \
+            --output {params.output} \
+            {params.use_sigmoid} \
+            {params.top_n} \
+            2>&1 | tee {log}
+        """
 
 # ============================================================================
-# Step 7: TracIn Analysis (DISABLED - requires train_pytorch.py outputs)
+# Step 7: TracIn Analysis (Optional)
 # ============================================================================
-# NOTE: TracIn analysis requires checkpoint files from train_pytorch.py.
-# PyKEEN's train.py uses a different checkpoint format via callbacks.
-# To use TracIn, switch back to train_pytorch.py in the train_model rule.
+
+rule tracin_analysis:
+    """
+    Run TracIn analysis to compute training data influence on test predictions
+    """
+    input:
+        best_model = f"{BASE_DIR}/models/conve/best_model.pt",
+        test = f"{BASE_DIR}/test.txt"
+    output:
+        analysis = f"{BASE_DIR}/results/tracin/tracin_analysis_{{batch}}.json"
+    params:
+        model_dir = f"{BASE_DIR}/models/conve",
+        output_dir = f"{BASE_DIR}/results/tracin",
+        learning_rate = config.get("learning_rate", 0.001),
+        top_k = config.get("tracin_top_k", 10),
+        max_test = config.get("tracin_max_test_triples", 100),
+        batch = "{batch}"
+    log:
+        f"{BASE_DIR}/logs/tracin_analysis_{{batch}}.log"
+    resources:
+        gpu = 1 if config.get("use_gpu", True) else 0
+    shell:
+        """
+        python run_tracin_fast.py \
+            --model-dir {params.model_dir} \
+            --learning-rate {params.learning_rate} \
+            --top-k {params.top_k} \
+            --max-test-triples {params.max_test} \
+            --batch-id {params.batch} \
+            --output-dir {params.output_dir} \
+            2>&1 | tee {log}
+        """
 
 # ============================================================================
 # Utility Rules

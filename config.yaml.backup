@@ -91,16 +91,15 @@ learning_rate: 0.001
 label_smoothing: 0.1
 
 # Early stopping configuration
-early_stopping: false
+early_stopping: true
 patience: 10
 
 # Use GPU for training (set to false for CPU-only)
 use_gpu: true
 
-# Checkpoint configuration
+# Checkpoint configuration (for train_pytorch.py)
 checkpoint_frequency: 2  # Save checkpoint every N epochs
-checkpoint_dir: null  # Custom checkpoint directory (null = use default: {output_dir}/checkpoints)
-num_workers: 4  # Number of data loader workers (for train_pytorch.py only)
+num_workers: 4  # Number of data loader workers
 
 # ============================================================================
 # Evaluation Configuration

@@ -20,18 +20,55 @@ import torch
 from pykeen.datasets import Dataset
 from pykeen.pipeline import pipeline
 from pykeen.triples import TriplesFactory
-from pykeen.training import SLCWATrainingLoop
+from pykeen.training import SLCWATrainingLoop, TrainingCallback
 from pykeen.evaluation import RankBasedEvaluator
 from pykeen.stoppers import EarlyStopper
 
 from evaluate import evaluate_model
 from model import ConvEWithGradients
 
+# Setup logging first (before class definitions that use logger)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class MultiCheckpointCallback(TrainingCallback):
+    """Custom callback to save checkpoints every N epochs with unique names."""
+
+    def __init__(self, checkpoint_dir, checkpoint_frequency=2):
+        """
+        Save checkpoints every N epochs with unique names.
+
+        Args:
+            checkpoint_dir: Directory to save checkpoints
+            checkpoint_frequency: Save every N epochs
+        """
+        self.checkpoint_dir = Path(checkpoint_dir)
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.checkpoint_frequency = checkpoint_frequency
+        logger.info(f"MultiCheckpointCallback initialized: saving every {checkpoint_frequency} epochs to {checkpoint_dir}")
+
+    def post_epoch(self, epoch: int, epoch_loss: float, **kwargs):
+        """Called after each epoch."""
+        if (epoch + 1) % self.checkpoint_frequency == 0:  # +1 because epochs are 0-indexed
+            checkpoint_name = f'conve_checkpoint_epoch_{epoch + 1}.pt'
+            checkpoint_path = self.checkpoint_dir / checkpoint_name
+
+            # Save the model state
+            training_loop = kwargs.get('training_loop')
+            if training_loop:
+                torch.save({
+                    'epoch': epoch + 1,
+                    'model_state_dict': training_loop.model.state_dict(),
+                    'optimizer_state_dict': training_loop.optimizer.state_dict(),
+                    'loss': epoch_loss,
+                }, checkpoint_path)
+                logger.info(f"Saved checkpoint: {checkpoint_path}")
+            else:
+                logger.warning(f"Checkpoint not saved at epoch {epoch + 1}: training_loop not found in kwargs")
 
 
 def load_triples_factory(
@@ -108,11 +145,12 @@ def train_model(
     batch_size: int = 256,
     learning_rate: float = 0.001,
     label_smoothing: float = 0.1,
+    # Checkpoint options
+    checkpoint_dir: Optional[str] = None,
+    checkpoint_frequency: int = 2,
     # Other options
     use_gpu: bool = True,
     random_seed: int = 42,
-    save_checkpoints: bool = True,
-    checkpoint_frequency: int = 10,
     early_stopping: bool = True,
     patience: int = 10,
     track_gradients: bool = False
@@ -139,10 +177,10 @@ def train_model(
         batch_size: Training batch size
         learning_rate: Learning rate
         label_smoothing: Label smoothing parameter
+        checkpoint_dir: Directory for checkpoint files (default: {output_dir}/checkpoints)
+        checkpoint_frequency: Save checkpoint every N epochs
         use_gpu: Whether to use GPU
         random_seed: Random seed for reproducibility
-        save_checkpoints: Whether to save model checkpoints
-        checkpoint_frequency: Save checkpoint every N epochs
         early_stopping: Whether to use early stopping
         patience: Patience for early stopping
         track_gradients: Whether to track gradients for TracIn
@@ -200,14 +238,19 @@ def train_model(
     # Train model using PyKEEN pipeline
     logger.info("Starting training...")
 
+    # Create checkpoint callback
+    if checkpoint_dir is None:
+        checkpoint_dir = os.path.join(output_dir, 'checkpoints')
+    checkpoint_callback = MultiCheckpointCallback(
+        checkpoint_dir=checkpoint_dir,
+        checkpoint_frequency=checkpoint_frequency
+    )
+
     # Prepare training kwargs - label smoothing only works with certain losses
     training_kwargs = {
         'num_epochs': num_epochs,
         'batch_size': batch_size,
-        'checkpoint_directory': '/workspace/data/robokop/CGGD_alltreat/checkpoints',  # where to store checkpoints
-        'checkpoint_frequency': 2,                # save every 2 epochs
-        'checkpoint_name': 'conve_checkpoint',    # base name
-        'checkpoint_on_failure': True,            # also save if interrupted
+        'callbacks': [checkpoint_callback],  # Use custom callback instead of default checkpoint kwargs
     }
 
     # Only add label smoothing if it's non-zero and using BCEWithLogits loss
@@ -348,6 +391,12 @@ def parse_args():
     parser.add_argument('--learning-rate', type=float, default=0.001)
     parser.add_argument('--label-smoothing', type=float, default=0.1)
 
+    # Checkpoint options
+    parser.add_argument('--checkpoint-dir', type=str, default=None,
+                       help='Directory for checkpoint files (default: {output_dir}/checkpoints)')
+    parser.add_argument('--checkpoint-frequency', type=int, default=2,
+                       help='Save checkpoint every N epochs')
+
     # Other options
     parser.add_argument('--no-gpu', action='store_true', help='Disable GPU usage')
     parser.add_argument('--random-seed', type=int, default=42)
@@ -382,6 +431,8 @@ def main():
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         label_smoothing=args.label_smoothing,
+        checkpoint_dir=args.checkpoint_dir,
+        checkpoint_frequency=args.checkpoint_frequency,
         use_gpu=not args.no_gpu,
         random_seed=args.random_seed,
         early_stopping=not args.no_early_stopping,
