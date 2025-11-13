@@ -80,8 +80,9 @@ class ConvE(nn.Module):
         self.output_dropout = nn.Dropout(output_dropout)
 
         # Calculate flattened size after convolution
+        # Note: head and relation embeddings are concatenated along width, so input width is 2*embedding_width
         conv_out_height = embedding_height - kernel_height + 1
-        conv_out_width = embedding_width - kernel_width + 1
+        conv_out_width = (2 * embedding_width) - kernel_width + 1
         flattened_size = output_channels * conv_out_height * conv_out_width
 
         # Fully connected layer
