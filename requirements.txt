@@ -24,4 +24,5 @@ networkx>=2.6.0
 torch-geometric
 
 # Workflow management
-snakemake>=7.0.0
+snakemake==7.32.4
+pulp==2.7.0
