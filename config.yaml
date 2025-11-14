@@ -81,7 +81,7 @@ output_dropout: 0.3
 num_epochs: 20
 
 # Batch size for training
-batch_size: 128
+batch_size: 32768
 
 # Learning rate (Adam optimizer)
 learning_rate: 0.001
@@ -108,7 +108,7 @@ num_workers: 4  # Number of data loader workers (for train_pytorch.py only)
 
 # Skip evaluation on test set after training (default: false)
 # Set to true to skip evaluation and only save the trained model
-skip_evaluation: false
+skip_evaluation: true
 
 # Use sigmoid to convert scores to probabilities [0, 1] (default: False, returns raw logits)
 use_sigmoid: true
