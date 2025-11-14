@@ -435,12 +435,12 @@ def main():
                                 logger.info(f"  ✓ Found matching configuration: h={h}, w={w}")
                                 logger.info(f"    hr1d input size: {test_hr1d_size}")
 
-                            # Use this configuration
-                            model = test_model
-                            model.load_state_dict(state_dict)
-                            model.eval()
-                            found = True
-                            break
+                                # Use this configuration
+                                model = test_model
+                                model.load_state_dict(state_dict)
+                                model.eval()
+                                found = True
+                                break
 
             if not found:
                 logger.error("Could not find matching embedding configuration")
