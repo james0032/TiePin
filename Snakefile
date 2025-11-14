@@ -44,8 +44,8 @@ rule all:
         f"{BASE_DIR}/processed/rel_dict.txt",
         # Trained model (PyKEEN outputs)
         f"{BASE_DIR}/models/conve/config.json",
-        f"{BASE_DIR}/models/conve/test_results.json",
-        # Evaluation results (score_only.py outputs)
+        # Note: test_results.json from train.py is optional (only if skip_evaluation=false)
+        # Evaluation results (score_only.py outputs) - use this for reliable evaluation
         f"{BASE_DIR}/results/evaluation/test_scores.json",
         f"{BASE_DIR}/results/evaluation/test_scores_ranked.json"
         # Note: TracIn analysis is disabled when using train.py (PyKEEN)
