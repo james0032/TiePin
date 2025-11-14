@@ -345,9 +345,14 @@ class ProximityFilterPyG:
         tail_nodes_set = set(tail_nodes.tolist())
         intersect_nodes_set = head_nodes_set & tail_nodes_set
 
+        # IMPORTANT: Always include the test entities themselves in the intersection
+        # This ensures edges connected to test entities are preserved
+        intersect_nodes_set.add(test_h)
+        intersect_nodes_set.add(test_t)
+
         logger.info(f"Found {len(head_nodes_set)} nodes in {n_hops}-hop neighborhood of head (drug)")
         logger.info(f"Found {len(tail_nodes_set)} nodes in {n_hops}-hop neighborhood of tail (disease)")
-        logger.info(f"Intersection: {len(intersect_nodes_set)} nodes reachable from BOTH head and tail")
+        logger.info(f"Intersection: {len(intersect_nodes_set)} nodes reachable from BOTH head and tail (including test entities)")
 
         # Use the union of edge indices for degree computation, but filter by intersection
         # Combine both edge sets for subgraph
@@ -490,9 +495,14 @@ class ProximityFilterPyG:
         tail_nodes_set = set(tail_nodes.tolist())
         intersect_nodes_set = head_nodes_set & tail_nodes_set
 
+        # IMPORTANT: Always include all test entities in the intersection
+        # This ensures edges connected to test entities are preserved
+        intersect_nodes_set.update(head_entities)
+        intersect_nodes_set.update(tail_entities)
+
         logger.info(f"Found {len(head_nodes_set)} nodes in {n_hops}-hop neighborhood of heads (drugs)")
         logger.info(f"Found {len(tail_nodes_set)} nodes in {n_hops}-hop neighborhood of tails (diseases)")
-        logger.info(f"Intersection: {len(intersect_nodes_set)} nodes reachable from BOTH heads and tails")
+        logger.info(f"Intersection: {len(intersect_nodes_set)} nodes reachable from BOTH heads and tails (including test entities)")
 
         # Use the union of edge indices for degree computation, but filter by intersection
         # Combine both edge sets for subgraph
