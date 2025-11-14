@@ -98,13 +98,17 @@ patience: 10
 use_gpu: true
 
 # Checkpoint configuration
-checkpoint_frequency: 2  # Save checkpoint every N epochs
+checkpoint_frequency: 2  # Save checkpoint every N epochs (1 = save after every epoch)
 checkpoint_dir: "/workspace/data/robokop/CGGD_alltreat/models/conve/checkpoints"  # Custom checkpoint directory (null = use default: {output_dir}/checkpoints)
 num_workers: 4  # Number of data loader workers (for train_pytorch.py only)
 
 # ============================================================================
 # Evaluation Configuration
 # ============================================================================
+
+# Skip evaluation on test set after training (default: false)
+# Set to true to skip evaluation and only save the trained model
+skip_evaluation: false
 
 # Use sigmoid to convert scores to probabilities [0, 1] (default: False, returns raw logits)
 use_sigmoid: true

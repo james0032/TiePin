@@ -118,7 +118,8 @@ def train_model(
     random_seed: int = 42,
     early_stopping: bool = True,
     patience: int = 10,
-    track_gradients: bool = False
+    track_gradients: bool = False,
+    skip_evaluation: bool = False
 ):
     """Train ConvE model.
 
@@ -149,6 +150,7 @@ def train_model(
         early_stopping: Whether to use early stopping
         patience: Patience for early stopping
         track_gradients: Whether to track gradients for TracIn
+        skip_evaluation: Whether to skip evaluation on test set after training
     """
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -287,31 +289,43 @@ def train_model(
     logger.info(f"Saved model to {output_dir}")
 
     # Evaluate on test set with detailed metrics
-    logger.info("Evaluating on test set...")
-    test_results_path = os.path.join(output_dir, 'test_results.json')
-    detailed_results = evaluate_model(
-        model=result.model,
-        test_triples=testing,
-        training_triples=training,
-        validation_triples=validation,
-        batch_size=batch_size,
-        filter_triples=True,
-        output_path=test_results_path,
-        device=device
-    )
+    if skip_evaluation:
+        logger.info("Skipping evaluation (skip_evaluation=True)")
+        logger.info("You can run evaluation separately using score_only.py")
+    else:
+        # Wrap in try-except to prevent Snakemake from removing model if evaluation fails
+        try:
+            logger.info("Evaluating on test set...")
+            test_results_path = os.path.join(output_dir, 'test_results.json')
+            detailed_results = evaluate_model(
+                model=result.model,
+                test_triples=testing,
+                training_triples=training,
+                validation_triples=validation,
+                batch_size=batch_size,
+                filter_triples=True,
+                output_path=test_results_path,
+                device=device
+            )
 
-    # Print final results
-    metrics = detailed_results['metrics']
-    logger.info("=" * 60)
-    logger.info("Final Test Results:")
-    logger.info("=" * 60)
-    logger.info(f"Mean Rank: {metrics['mean_rank']:.2f}")
-    logger.info(f"Mean Reciprocal Rank: {metrics['mean_reciprocal_rank']:.4f}")
-    logger.info(f"Hits@1: {metrics['hits@1']:.4f}")
-    logger.info(f"Hits@3: {metrics['hits@3']:.4f}")
-    logger.info(f"Hits@5: {metrics['hits@5']:.4f}")
-    logger.info(f"Hits@10: {metrics['hits@10']:.4f}")
-    logger.info("=" * 60)
+            # Print final results
+            metrics = detailed_results['metrics']
+            logger.info("=" * 60)
+            logger.info("Final Test Results:")
+            logger.info("=" * 60)
+            logger.info(f"Mean Rank: {metrics['mean_rank']:.2f}")
+            logger.info(f"Mean Reciprocal Rank: {metrics['mean_reciprocal_rank']:.4f}")
+            logger.info(f"Hits@1: {metrics['hits@1']:.4f}")
+            logger.info(f"Hits@3: {metrics['hits@3']:.4f}")
+            logger.info(f"Hits@5: {metrics['hits@5']:.4f}")
+            logger.info(f"Hits@10: {metrics['hits@10']:.4f}")
+            logger.info("=" * 60)
+        except Exception as e:
+            logger.error(f"Evaluation failed: {e}")
+            logger.error("Model training completed successfully, but evaluation encountered an error.")
+            logger.error(f"Model has been saved to: {output_dir}")
+            logger.error("You can run evaluation separately using score_only.py")
+            # Don't re-raise - allow train.py to exit successfully so Snakemake doesn't remove outputs
 
     return result
 
@@ -377,6 +391,8 @@ def parse_args():
     parser.add_argument('--patience', type=int, default=10)
     parser.add_argument('--track-gradients', action='store_true',
                        help='Track gradients for TracIn analysis')
+    parser.add_argument('--skip-evaluation', action='store_true',
+                       help='Skip evaluation on test set after training')
 
     return parser.parse_args()
 
@@ -410,7 +426,8 @@ def main():
         random_seed=args.random_seed,
         early_stopping=not args.no_early_stopping,
         patience=args.patience,
-        track_gradients=args.track_gradients
+        track_gradients=args.track_gradients,
+        skip_evaluation=args.skip_evaluation
     )
 
 

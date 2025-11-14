@@ -255,8 +255,9 @@ rule train_model:
     output:
         # PyKEEN outputs - model is saved in directory structure
         model_dir = directory(f"{BASE_DIR}/models/conve"),
-        config_out = f"{BASE_DIR}/models/conve/config.json",
-        test_results = f"{BASE_DIR}/models/conve/test_results.json"
+        config_out = f"{BASE_DIR}/models/conve/config.json"
+        # Note: test_results.json is created only if skip_evaluation=false
+        # Use evaluate_model rule for separate evaluation
     params:
         output_dir = f"{BASE_DIR}/models/conve",
         num_epochs = config.get("num_epochs", 100),
@@ -277,7 +278,8 @@ rule train_model:
         random_seed = config.get("random_seed", 42),
         no_early_stopping = "" if config.get("early_stopping", True) else "--no-early-stopping",
         gpu = "" if config.get("use_gpu", True) else "--no-gpu",
-        checkpoint_dir_arg = f"--checkpoint-dir {config.get('checkpoint_dir')}" if config.get("checkpoint_dir") else ""
+        checkpoint_dir_arg = f"--checkpoint-dir {config.get('checkpoint_dir')}" if config.get("checkpoint_dir") else "",
+        skip_evaluation = "--skip-evaluation" if config.get("skip_evaluation", False) else ""
     log:
         f"{BASE_DIR}/logs/train_model.log"
     resources:
@@ -309,6 +311,7 @@ rule train_model:
             --random-seed {params.random_seed} \
             {params.checkpoint_dir_arg} \
             {params.no_early_stopping} \
+            {params.skip_evaluation} \
             {params.gpu} \
             2>&1 | tee {log}
         """
