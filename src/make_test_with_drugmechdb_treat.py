@@ -207,36 +207,6 @@ def write_edges(edges: List[Tuple[str, str, str]], output_path: str):
             f.write(f"{subject}\t{predicate}\t{obj}\n")
 
 
-def load_relation_dict(rel_dict_path: str) -> Dict[str, str]:
-    """Load relation dictionary mapping relation labels to IDs.
-
-    Args:
-        rel_dict_path: Path to rel_dict.txt file
-
-    Returns:
-        Dictionary mapping relation labels (e.g., 'biolink:treats') to IDs (e.g., 'predicate:28')
-    """
-    logger.info(f"Loading relation dictionary from {rel_dict_path}")
-    rel_to_id = {}
-
-    with open(rel_dict_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-
-            parts = line.split('\t')
-            if len(parts) != 2:
-                logger.warning(f"Invalid line in rel_dict.txt: {line}")
-                continue
-
-            rel_label, rel_id = parts
-            rel_to_id[rel_label] = rel_id
-
-    logger.info(f"Loaded {len(rel_to_id)} relation mappings")
-    return rel_to_id
-
-
 def save_statistics(stats: Dict, output_path: str):
     """Save statistics to JSON file.
 
@@ -306,13 +276,6 @@ Examples:
     )
 
     parser.add_argument(
-        '--rel-dict-file',
-        type=str,
-        default='processed/rel_dict.txt',
-        help='Name of relation dictionary file (default: processed/rel_dict.txt)'
-    )
-
-    parser.add_argument(
         '--output-dir',
         type=str,
         default=None,
@@ -361,7 +324,6 @@ def main():
 
         triples_path = os.path.join(input_dir, args.triples_file)
         edge_map_path = os.path.join(input_dir, args.edge_map_file)
-        rel_dict_path = os.path.join(input_dir, args.rel_dict_file)
 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
@@ -371,7 +333,6 @@ def main():
         logger.info(f"  Input directory: {input_dir}")
         logger.info(f"  Triples file: {triples_path}")
         logger.info(f"  Edge map file: {edge_map_path}")
-        logger.info(f"  Relation dict file: {rel_dict_path}")
         logger.info(f"  Filtered TSV: {args.filtered_tsv}")
         logger.info(f"  Output directory: {output_dir}")
         logger.info(f"  Test percentage: {args.test_pct * 100}%")
@@ -391,17 +352,10 @@ def main():
             logger.error(f"Filtered TSV file not found: {args.filtered_tsv}")
             return 1
 
-        if not os.path.exists(rel_dict_path):
-            logger.error(f"Relation dict file not found: {rel_dict_path}")
-            return 1
-
         # Validate test percentage
         if args.test_pct <= 0 or args.test_pct >= 1:
             logger.error(f"Test percentage must be between 0 and 1 (got {args.test_pct})")
             return 1
-
-        # Load relation dictionary for predicate mapping
-        rel_to_id = load_relation_dict(rel_dict_path)
 
         # Load edge map and find treats predicates
         edge_map = load_edge_map(edge_map_path)
@@ -415,6 +369,35 @@ def main():
 
         logger.info(f"Treats predicate IDs: {treats_predicates}")
 
+        # Since there might be multiple predicate IDs for treats (different qualifiers),
+        # we'll use the first one for conversion. In practice, filtered TSV just has "biolink:treats"
+        # which should map to a predicate ID with empty qualifiers.
+        if len(treats_predicates) > 1:
+            logger.warning(f"Found multiple treats predicate IDs: {treats_predicates}")
+            logger.warning("Will use all of them for matching")
+
+        # For conversion, we need to pick one predicate ID to convert biolink:treats to
+        # Look for the one with empty qualifiers (most common case)
+        treats_predicate_id = None
+        for predicate_detail, predicate_id in edge_map.items():
+            try:
+                pred_dict = json.loads(predicate_detail)
+                if (pred_dict.get("predicate") == "biolink:treats" and
+                    not pred_dict.get("subject_aspect_qualifier") and
+                    not pred_dict.get("subject_direction_qualifier") and
+                    not pred_dict.get("object_aspect_qualifier") and
+                    not pred_dict.get("object_direction_qualifier")):
+                    treats_predicate_id = predicate_id
+                    logger.info(f"Found treats predicate ID with empty qualifiers: {treats_predicate_id}")
+                    break
+            except json.JSONDecodeError:
+                continue
+
+        if not treats_predicate_id:
+            # Fallback: use the first treats predicate ID
+            treats_predicate_id = list(treats_predicates)[0]
+            logger.warning(f"No treats predicate with empty qualifiers found, using first one: {treats_predicate_id}")
+
         # Load filtered treats edges
         filtered_edges = load_filtered_treats_edges(args.filtered_tsv)
 
@@ -422,26 +405,26 @@ def main():
             logger.error("No edges found in filtered TSV file")
             return 1
 
-        # Convert predicates from biolink labels to predicate IDs
-        logger.info("Converting predicates from biolink labels to predicate IDs")
+        # Convert predicates from biolink labels to predicate IDs using edge_map
+        logger.info(f"Converting predicates from biolink:treats to {treats_predicate_id}")
         converted_edges = []
         unmapped_predicates = set()
 
         for subj, pred, obj in filtered_edges:
-            if pred in rel_to_id:
-                # Convert biolink:treats -> predicate:28
-                pred_id = rel_to_id[pred]
-                converted_edges.append((subj, pred_id, obj))
+            if pred == "biolink:treats":
+                # Convert biolink:treats -> predicate:28 (or whatever the ID is)
+                converted_edges.append((subj, treats_predicate_id, obj))
             else:
                 unmapped_predicates.add(pred)
-                # Keep original predicate if not found (will log warning)
+                # Keep original predicate if not biolink:treats (unexpected)
+                logger.warning(f"Unexpected predicate in filtered TSV: {pred}, keeping as-is")
                 converted_edges.append((subj, pred, obj))
 
         if unmapped_predicates:
-            logger.warning(f"Found {len(unmapped_predicates)} unmapped predicates in filtered TSV: {unmapped_predicates}")
+            logger.warning(f"Found {len(unmapped_predicates)} non-treats predicates in filtered TSV: {unmapped_predicates}")
             logger.warning("These edges will use original predicates, which may not match rotorobo.txt format")
 
-        logger.info(f"Converted {len(converted_edges) - len(unmapped_predicates)} predicates to IDs")
+        logger.info(f"Converted {len(converted_edges) - len(unmapped_predicates)} predicates to {treats_predicate_id}")
         filtered_edges = converted_edges
 
         # Deduplicate filtered edges
