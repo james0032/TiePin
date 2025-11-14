@@ -20,7 +20,8 @@ import torch
 from pykeen.datasets import Dataset
 from pykeen.pipeline import pipeline
 from pykeen.triples import TriplesFactory
-from pykeen.training import SLCWATrainingLoop, TrainingCallback
+from pykeen.training import SLCWATrainingLoop
+from pykeen.training.callbacks import CheckpointTrainingCallback
 from pykeen.evaluation import RankBasedEvaluator
 from pykeen.stoppers import EarlyStopper
 
@@ -33,42 +34,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-
-class MultiCheckpointCallback(TrainingCallback):
-    """Custom callback to save checkpoints every N epochs with unique names."""
-
-    def __init__(self, checkpoint_dir, checkpoint_frequency=2):
-        """
-        Save checkpoints every N epochs with unique names.
-
-        Args:
-            checkpoint_dir: Directory to save checkpoints
-            checkpoint_frequency: Save every N epochs
-        """
-        self.checkpoint_dir = Path(checkpoint_dir)
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        self.checkpoint_frequency = checkpoint_frequency
-        logger.info(f"MultiCheckpointCallback initialized: saving every {checkpoint_frequency} epochs to {checkpoint_dir}")
-
-    def post_epoch(self, epoch: int, epoch_loss: float, **kwargs):
-        """Called after each epoch."""
-        if (epoch + 1) % self.checkpoint_frequency == 0:  # +1 because epochs are 0-indexed
-            checkpoint_name = f'conve_checkpoint_epoch_{epoch + 1}.pt'
-            checkpoint_path = self.checkpoint_dir / checkpoint_name
-
-            # Save the model state
-            training_loop = kwargs.get('training_loop')
-            if training_loop:
-                torch.save({
-                    'epoch': epoch + 1,
-                    'model_state_dict': training_loop.model.state_dict(),
-                    'optimizer_state_dict': training_loop.optimizer.state_dict(),
-                    'loss': epoch_loss,
-                }, checkpoint_path)
-                logger.info(f"Saved checkpoint: {checkpoint_path}")
-            else:
-                logger.warning(f"Checkpoint not saved at epoch {epoch + 1}: training_loop not found in kwargs")
 
 
 def load_triples_factory(
@@ -238,19 +203,27 @@ def train_model(
     # Train model using PyKEEN pipeline
     logger.info("Starting training...")
 
-    # Create checkpoint callback
+    # Create checkpoint callback using PyKEEN's built-in CheckpointTrainingCallback
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(output_dir, 'checkpoints')
-    checkpoint_callback = MultiCheckpointCallback(
-        checkpoint_dir=checkpoint_dir,
-        checkpoint_frequency=checkpoint_frequency
+
+    # Create checkpoint directory if it doesn't exist
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    logger.info(f"Checkpoint configuration: saving every {checkpoint_frequency} epochs to {checkpoint_dir}")
+
+    checkpoint_callback = CheckpointTrainingCallback(
+        root=checkpoint_dir,
+        schedule="every",
+        schedule_kwargs=dict(frequency=checkpoint_frequency),
+        name_template="checkpoint_epoch_{epoch:07d}.pt"
     )
 
     # Prepare training kwargs - label smoothing only works with certain losses
     training_kwargs = {
         'num_epochs': num_epochs,
         'batch_size': batch_size,
-        'callbacks': [checkpoint_callback],  # Use custom callback instead of default checkpoint kwargs
+        'callbacks': [checkpoint_callback],  # Use PyKEEN's CheckpointTrainingCallback for automatic checkpointing
     }
 
     # Only add label smoothing if it's non-zero and using BCEWithLogits loss

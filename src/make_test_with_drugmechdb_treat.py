@@ -382,16 +382,42 @@ def main():
 
         # Remove test edges from all edges to create train candidates
         logger.info("Creating train candidates by removing test edges from rotorobo.txt")
-        test_edge_set = set(test_edges)
-        train_candidates = [edge for edge in all_edges if edge not in test_edge_set]
 
-        removed_count = len(all_edges) - len(train_candidates)
+        # Create a set of (subject, object) pairs from test edges to match against
+        # We only match on subject and object, NOT predicate, because predicate format differs
+        # between filtered TSV (biolink:treats) and rotorobo.txt (predicate IDs like R001)
+        logger.info("Matching test edges by (subject, object) pairs only (ignoring predicate format)")
+        test_edge_pairs = {(subj, obj) for subj, pred, obj in test_edges}
+        logger.info(f"Created {len(test_edge_pairs)} unique (subject, object) pairs from test edges")
+
+        # Remove edges where (subject, object) matches a test edge AND predicate is in treats_predicates
+        train_candidates = []
+        removed_count = 0
+        for edge in all_edges:
+            subj, pred, obj = edge
+            # Remove if this is a test edge (matching subject/object) with a treats predicate
+            if (subj, obj) in test_edge_pairs and pred in treats_predicates:
+                removed_count += 1
+            else:
+                train_candidates.append(edge)
+
         logger.info(f"Removed {removed_count} test edges from rotorobo.txt")
         logger.info(f"Train candidates: {len(train_candidates)} edges")
 
         if removed_count != len(test_edges):
             logger.warning(f"Mismatch: Expected to remove {len(test_edges)} edges but removed {removed_count}")
             logger.warning(f"This could mean {len(test_edges) - removed_count} test edges were not found in rotorobo.txt")
+
+            # Debug: check a few test edges to see what's going on
+            logger.info("Debugging first 5 test edges:")
+            for i, (subj, pred, obj) in enumerate(test_edges[:5]):
+                logger.info(f"  Test edge {i+1}: ({subj}, {pred}, {obj})")
+                # Check if this pair exists in rotorobo with treats predicate
+                matching_edges = [(s, p, o) for s, p, o in all_edges if s == subj and o == obj and p in treats_predicates]
+                if matching_edges:
+                    logger.info(f"    Found in rotorobo.txt with predicates: {[p for _, p, _ in matching_edges]}")
+                else:
+                    logger.info(f"    NOT found in rotorobo.txt")
 
         # Write output files
         test_output = os.path.join(output_dir, 'test.txt')
