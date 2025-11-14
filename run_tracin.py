@@ -166,8 +166,17 @@ def run_tracin_analysis(
         else:
             logger.info("No config in checkpoint, will infer parameters...")
     elif isinstance(checkpoint, dict):
-        state_dict = checkpoint
-        logger.info("Checkpoint is a plain state_dict")
+        # Check if this is a nested structure with state_dict inside
+        if 'state_dict' in checkpoint and isinstance(checkpoint['state_dict'], dict):
+            # PyTorch regular checkpoint format: {'state_dict': OrderedDict(...), 'version': int, ...}
+            state_dict = checkpoint['state_dict']
+            logger.info("Checkpoint has nested 'state_dict' key (PyTorch format)")
+            logger.info(f"  Outer keys: {list(checkpoint.keys())}")
+            logger.info(f"  Inner state_dict has {len(state_dict)} parameter tensors")
+        else:
+            # Just a state_dict - infer parameters from tensor shapes
+            state_dict = checkpoint
+            logger.info("Checkpoint is a plain state_dict")
     else:
         logger.error("Unknown checkpoint format")
         return
@@ -178,15 +187,19 @@ def run_tracin_analysis(
 
         # Infer embedding_dim from entity embeddings
         if 'entity_representations.0._embeddings.weight' in state_dict:
-            inferred_dim = state_dict['entity_representations.0._embeddings.weight'].shape[1]
-            logger.info(f"  Inferred embedding_dim={inferred_dim} from entity embeddings")
-            embedding_dim = inferred_dim
+            value = state_dict['entity_representations.0._embeddings.weight']
+            if hasattr(value, 'shape') and len(value.shape) >= 2:
+                inferred_dim = value.shape[1]
+                logger.info(f"  Inferred embedding_dim={inferred_dim} from entity embeddings")
+                embedding_dim = inferred_dim
 
         # Infer output_channels from convolution layer
         if 'interaction.hr2d.2.weight' in state_dict:
-            inferred_channels = state_dict['interaction.hr2d.2.weight'].shape[0]
-            logger.info(f"  Inferred output_channels={inferred_channels} from conv layer")
-            output_channels = inferred_channels
+            value = state_dict['interaction.hr2d.2.weight']
+            if hasattr(value, 'shape') and len(value.shape) >= 1:
+                inferred_channels = value.shape[0]
+                logger.info(f"  Inferred output_channels={inferred_channels} from conv layer")
+                output_channels = inferred_channels
 
     # Create model with inferred parameters
     model_kwargs = {
@@ -235,14 +248,16 @@ def run_tracin_analysis(
                     )
 
                     if 'interaction.hr1d.0.weight' in test_model.state_dict():
-                        test_size = test_model.state_dict()['interaction.hr1d.0.weight'].shape[1]
-                        if test_size == expected_hr1d_in:
-                            logger.info(f"  ✓ Found: h={h}, w={w}")
-                            model = test_model
-                            model.load_state_dict(state_dict)
-                            model.eval()
-                            found = True
-                            break
+                        value = test_model.state_dict()['interaction.hr1d.0.weight']
+                        if hasattr(value, 'shape') and len(value.shape) >= 2:
+                            test_size = value.shape[1]
+                            if test_size == expected_hr1d_in:
+                                logger.info(f"  ✓ Found: h={h}, w={w}")
+                                model = test_model
+                                model.load_state_dict(state_dict)
+                                model.eval()
+                                found = True
+                                break
 
             if not found:
                 logger.error("Could not find matching configuration")

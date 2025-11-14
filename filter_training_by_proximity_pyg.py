@@ -321,29 +321,52 @@ class ProximityFilterPyG:
         logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}, "
                    f"strict_hop_constraint={strict_hop_constraint}")
 
-        # Compute hop distances if strict mode is enabled
-        if strict_hop_constraint:
-            hop_distances = self._compute_hop_distances([test_h, test_t], n_hops)
-            logger.info(f"Computed hop distances in strict mode")
-
-        # Use PyG's k_hop_subgraph to get n-hop neighborhood
-        # This is highly optimized and much faster than custom BFS
-        subset_nodes, subset_edge_index, mapping, edge_mask = k_hop_subgraph(
-            node_idx=[test_h, test_t],
+        # Get n-hop neighborhoods from head (drug) and tail (disease) separately
+        logger.info("Computing n-hop neighborhood from head entity (drug)...")
+        head_nodes, head_edge_index, _, _ = k_hop_subgraph(
+            node_idx=[test_h],
             num_hops=n_hops,
             edge_index=self.edge_index,
             relabel_nodes=False,
             num_nodes=len(self.node_degrees)
         )
 
-        logger.info(f"Found {len(subset_nodes)} nodes in {n_hops}-hop neighborhood")
+        logger.info("Computing n-hop neighborhood from tail entity (disease)...")
+        tail_nodes, tail_edge_index, _, _ = k_hop_subgraph(
+            node_idx=[test_t],
+            num_hops=n_hops,
+            edge_index=self.edge_index,
+            relabel_nodes=False,
+            num_nodes=len(self.node_degrees)
+        )
+
+        # INTERSECTION: Keep only nodes reachable from BOTH head and tail
+        head_nodes_set = set(head_nodes.tolist())
+        tail_nodes_set = set(tail_nodes.tolist())
+        intersect_nodes_set = head_nodes_set & tail_nodes_set
+
+        logger.info(f"Found {len(head_nodes_set)} nodes in {n_hops}-hop neighborhood of head (drug)")
+        logger.info(f"Found {len(tail_nodes_set)} nodes in {n_hops}-hop neighborhood of tail (disease)")
+        logger.info(f"Intersection: {len(intersect_nodes_set)} nodes reachable from BOTH head and tail")
+
+        # Use the union of edge indices for degree computation, but filter by intersection
+        # Combine both edge sets for subgraph
+        combined_edge_index = torch.cat([head_edge_index, tail_edge_index], dim=1)
+        # Remove duplicates
+        combined_edge_index = torch.unique(combined_edge_index, dim=1)
+        subset_edge_index = combined_edge_index
+
+        # Compute hop distances if strict mode is enabled
+        if strict_hop_constraint:
+            hop_distances = self._compute_hop_distances([test_h, test_t], n_hops)
+            logger.info(f"Computed hop distances in strict mode")
 
         # Compute degrees in subgraph
         subgraph_degrees = degree(subset_edge_index[0],
                                   num_nodes=len(self.node_degrees),
                                   dtype=torch.long)
 
-        # Filter edges by degree
+        # Filter edges by degree AND intersection constraint
         filtered_triple_indices = set()
 
         # Iterate over edges in subgraph
@@ -353,6 +376,11 @@ class ProximityFilterPyG:
 
             # Skip if this is a reverse edge we've already processed
             if src > dst:
+                continue
+
+            # INTERSECTION CONSTRAINT: Both endpoints must be in intersection set
+            # This ensures edges are on potential paths between drug and disease
+            if src not in intersect_nodes_set or dst not in intersect_nodes_set:
                 continue
 
             # Check filtering rules
