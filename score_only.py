@@ -227,9 +227,17 @@ def main():
         else:
             logger.info("No config found in checkpoint, will infer from state_dict...")
     elif isinstance(checkpoint, dict):
-        # Just a state_dict - infer parameters from tensor shapes
-        state_dict = checkpoint
-        logger.info("Checkpoint is a plain state_dict")
+        # Check if this is a nested structure with state_dict inside
+        if 'state_dict' in checkpoint and isinstance(checkpoint['state_dict'], dict):
+            # PyTorch regular checkpoint format: {'state_dict': OrderedDict(...), 'version': int, ...}
+            state_dict = checkpoint['state_dict']
+            logger.info("Checkpoint has nested 'state_dict' key (PyTorch format)")
+            logger.info(f"  Outer keys: {list(checkpoint.keys())}")
+            logger.info(f"  Inner state_dict has {len(state_dict)} parameter tensors")
+        else:
+            # Just a state_dict - infer parameters from tensor shapes
+            state_dict = checkpoint
+            logger.info("Checkpoint is a plain state_dict")
     else:
         logger.error(f"Unknown checkpoint format")
         return
