@@ -259,26 +259,34 @@ def main():
 
         for key in entity_embedding_keys:
             if key in state_dict:
-                embedding_dim = state_dict[key].shape[1]
-                logger.info(f"  ✓ Inferred embedding_dim={embedding_dim} from {key}")
-                break
+                value = state_dict[key]
+                if hasattr(value, 'shape') and len(value.shape) >= 2:
+                    embedding_dim = value.shape[1]
+                    logger.info(f"  ✓ Inferred embedding_dim={embedding_dim} from {key}")
+                    break
 
         # If still not found, search for any key containing 'entity' and 'embedding'
         if embedding_dim is None:
             for key in state_dict.keys():
                 if 'entity' in key.lower() and 'embedding' in key.lower() and 'weight' in key:
-                    embedding_dim = state_dict[key].shape[1]
-                    logger.info(f"  ✓ Inferred embedding_dim={embedding_dim} from {key}")
-                    break
+                    value = state_dict[key]
+                    if hasattr(value, 'shape') and len(value.shape) >= 2:
+                        embedding_dim = value.shape[1]
+                        logger.info(f"  ✓ Inferred embedding_dim={embedding_dim} from {key}")
+                        break
 
         # Infer output_channels from convolution layer
         # Check hr2d.2.weight which has shape [output_channels, 1, kernel_h, kernel_w]
         if 'interaction.hr2d.2.weight' in state_dict:
-            output_channels = state_dict['interaction.hr2d.2.weight'].shape[0]
-            logger.info(f"  ✓ Inferred output_channels={output_channels} from interaction.hr2d.2.weight")
+            value = state_dict['interaction.hr2d.2.weight']
+            if hasattr(value, 'shape') and len(value.shape) >= 1:
+                output_channels = value.shape[0]
+                logger.info(f"  ✓ Inferred output_channels={output_channels} from interaction.hr2d.2.weight")
         elif 'interaction.hr1d.0.weight' in state_dict:
-            output_channels = state_dict['interaction.hr1d.0.weight'].shape[0]
-            logger.info(f"  ✓ Inferred output_channels={output_channels} from interaction.hr1d.0.weight")
+            value = state_dict['interaction.hr1d.0.weight']
+            if hasattr(value, 'shape') and len(value.shape) >= 1:
+                output_channels = value.shape[0]
+                logger.info(f"  ✓ Inferred output_channels={output_channels} from interaction.hr1d.0.weight")
 
         # Try to infer embedding_height and embedding_width from hr1d layer size
         # In ConvE, entity and relation embeddings are STACKED (not concatenated)
@@ -287,8 +295,10 @@ def main():
         # The hr1d.0.weight has shape [output_dim, input_size]
         # input_size = (h - kernel_h + 1) * (w*2 - kernel_w + 1) * output_channels
         if 'interaction.hr1d.0.weight' in state_dict and embedding_dim and output_channels:
-            hr1d_input_size = state_dict['interaction.hr1d.0.weight'].shape[1]
-            logger.info(f"  hr1d input size: {hr1d_input_size}")
+            value = state_dict['interaction.hr1d.0.weight']
+            if hasattr(value, 'shape') and len(value.shape) >= 2:
+                hr1d_input_size = value.shape[1]
+                logger.info(f"  hr1d input size: {hr1d_input_size}")
 
             # Assuming kernel size 3x3 (default in ConvE)
             kernel_h, kernel_w = 3, 3
@@ -340,7 +350,11 @@ def main():
         logger.error(f"embedding_dim={embedding_dim}, output_channels={output_channels}")
         logger.error("Available keys in checkpoint:")
         for key in list(state_dict.keys())[:10]:
-            logger.error(f"  {key}: {state_dict[key].shape}")
+            value = state_dict[key]
+            if hasattr(value, 'shape'):
+                logger.error(f"  {key}: {value.shape}")
+            else:
+                logger.error(f"  {key}: {type(value)}")
         return
 
     # Create model with correct architecture
@@ -404,10 +418,12 @@ def main():
 
                     # Check if the hr1d layer size matches
                     if 'interaction.hr1d.0.weight' in test_model.state_dict():
-                        test_hr1d_size = test_model.state_dict()['interaction.hr1d.0.weight'].shape[1]
-                        if test_hr1d_size == expected_hr1d_in:
-                            logger.info(f"  ✓ Found matching configuration: h={h}, w={w}")
-                            logger.info(f"    hr1d input size: {test_hr1d_size}")
+                        value = test_model.state_dict()['interaction.hr1d.0.weight']
+                        if hasattr(value, 'shape') and len(value.shape) >= 2:
+                            test_hr1d_size = value.shape[1]
+                            if test_hr1d_size == expected_hr1d_in:
+                                logger.info(f"  ✓ Found matching configuration: h={h}, w={w}")
+                                logger.info(f"    hr1d input size: {test_hr1d_size}")
 
                             # Use this configuration
                             model = test_model
