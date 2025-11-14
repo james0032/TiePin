@@ -90,6 +90,7 @@ def load_filtered_treats_edges(filtered_tsv_path: str) -> List[Tuple[str, str, s
     """
     logger.info(f"Loading filtered treats edges from {filtered_tsv_path}")
     edges = []
+    first_data_line = None
 
     with open(filtered_tsv_path, 'r') as f:
         for line_num, line in enumerate(f, 1):
@@ -97,12 +98,19 @@ def load_filtered_treats_edges(filtered_tsv_path: str) -> List[Tuple[str, str, s
 
             # Skip header
             if line.startswith('Drug') or not line:
+                if line.startswith('Drug'):
+                    logger.info(f"Header line: {line}")
                 continue
 
             parts = line.split('\t')
             if len(parts) < 3:
                 logger.warning(f"Line {line_num}: Invalid format (expected at least 3 columns, got {len(parts)})")
                 continue
+
+            if first_data_line is None:
+                first_data_line = line
+                logger.info(f"First data line: {line}")
+                logger.info(f"  Columns: {parts}")
 
             subject = parts[0].strip()
             predicate = parts[1].strip()
@@ -111,6 +119,8 @@ def load_filtered_treats_edges(filtered_tsv_path: str) -> List[Tuple[str, str, s
             edges.append((subject, predicate, obj))
 
     logger.info(f"Loaded {len(edges)} filtered treats edges")
+    if edges:
+        logger.info(f"First edge tuple: (subject='{edges[0][0]}', predicate='{edges[0][1]}', object='{edges[0][2]}')")
     return edges
 
 
@@ -197,6 +207,36 @@ def write_edges(edges: List[Tuple[str, str, str]], output_path: str):
             f.write(f"{subject}\t{predicate}\t{obj}\n")
 
 
+def load_relation_dict(rel_dict_path: str) -> Dict[str, str]:
+    """Load relation dictionary mapping relation labels to IDs.
+
+    Args:
+        rel_dict_path: Path to rel_dict.txt file
+
+    Returns:
+        Dictionary mapping relation labels (e.g., 'biolink:treats') to IDs (e.g., 'predicate:28')
+    """
+    logger.info(f"Loading relation dictionary from {rel_dict_path}")
+    rel_to_id = {}
+
+    with open(rel_dict_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            parts = line.split('\t')
+            if len(parts) != 2:
+                logger.warning(f"Invalid line in rel_dict.txt: {line}")
+                continue
+
+            rel_label, rel_id = parts
+            rel_to_id[rel_label] = rel_id
+
+    logger.info(f"Loaded {len(rel_to_id)} relation mappings")
+    return rel_to_id
+
+
 def save_statistics(stats: Dict, output_path: str):
     """Save statistics to JSON file.
 
@@ -266,6 +306,13 @@ Examples:
     )
 
     parser.add_argument(
+        '--rel-dict-file',
+        type=str,
+        default='processed/rel_dict.txt',
+        help='Name of relation dictionary file (default: processed/rel_dict.txt)'
+    )
+
+    parser.add_argument(
         '--output-dir',
         type=str,
         default=None,
@@ -314,6 +361,7 @@ def main():
 
         triples_path = os.path.join(input_dir, args.triples_file)
         edge_map_path = os.path.join(input_dir, args.edge_map_file)
+        rel_dict_path = os.path.join(input_dir, args.rel_dict_file)
 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
@@ -323,6 +371,7 @@ def main():
         logger.info(f"  Input directory: {input_dir}")
         logger.info(f"  Triples file: {triples_path}")
         logger.info(f"  Edge map file: {edge_map_path}")
+        logger.info(f"  Relation dict file: {rel_dict_path}")
         logger.info(f"  Filtered TSV: {args.filtered_tsv}")
         logger.info(f"  Output directory: {output_dir}")
         logger.info(f"  Test percentage: {args.test_pct * 100}%")
@@ -342,10 +391,17 @@ def main():
             logger.error(f"Filtered TSV file not found: {args.filtered_tsv}")
             return 1
 
+        if not os.path.exists(rel_dict_path):
+            logger.error(f"Relation dict file not found: {rel_dict_path}")
+            return 1
+
         # Validate test percentage
         if args.test_pct <= 0 or args.test_pct >= 1:
             logger.error(f"Test percentage must be between 0 and 1 (got {args.test_pct})")
             return 1
+
+        # Load relation dictionary for predicate mapping
+        rel_to_id = load_relation_dict(rel_dict_path)
 
         # Load edge map and find treats predicates
         edge_map = load_edge_map(edge_map_path)
@@ -353,7 +409,11 @@ def main():
 
         if not treats_predicates:
             logger.error("No treats predicates found in edge map")
+            logger.error("This means no predicate mappings in edge_map.json have 'biolink:treats' as the predicate")
+            logger.error("Please check the edge_map.json file format")
             return 1
+
+        logger.info(f"Treats predicate IDs: {treats_predicates}")
 
         # Load filtered treats edges
         filtered_edges = load_filtered_treats_edges(args.filtered_tsv)
@@ -361,6 +421,28 @@ def main():
         if not filtered_edges:
             logger.error("No edges found in filtered TSV file")
             return 1
+
+        # Convert predicates from biolink labels to predicate IDs
+        logger.info("Converting predicates from biolink labels to predicate IDs")
+        converted_edges = []
+        unmapped_predicates = set()
+
+        for subj, pred, obj in filtered_edges:
+            if pred in rel_to_id:
+                # Convert biolink:treats -> predicate:28
+                pred_id = rel_to_id[pred]
+                converted_edges.append((subj, pred_id, obj))
+            else:
+                unmapped_predicates.add(pred)
+                # Keep original predicate if not found (will log warning)
+                converted_edges.append((subj, pred, obj))
+
+        if unmapped_predicates:
+            logger.warning(f"Found {len(unmapped_predicates)} unmapped predicates in filtered TSV: {unmapped_predicates}")
+            logger.warning("These edges will use original predicates, which may not match rotorobo.txt format")
+
+        logger.info(f"Converted {len(converted_edges) - len(unmapped_predicates)} predicates to IDs")
+        filtered_edges = converted_edges
 
         # Deduplicate filtered edges
         logger.info(f"Deduplicating filtered edges (original count: {len(filtered_edges)})")
@@ -380,23 +462,53 @@ def main():
         # Load all edges from rotorobo.txt
         all_edges = load_all_edges(triples_path)
 
+        # Debug: Show sample edges from test set and rotorobo
+        logger.info("=" * 80)
+        logger.info("DEBUG: Sample edges comparison")
+        logger.info("=" * 80)
+        logger.info(f"Sample test edge (from filtered TSV): {test_edges[0] if test_edges else 'None'}")
+        logger.info(f"Sample rotorobo edge: {all_edges[0] if all_edges else 'None'}")
+
+        # Check if any rotorobo edges have treats predicates
+        treats_edges_in_rotorobo = [e for e in all_edges if e[1] in treats_predicates]
+        logger.info(f"Total treats edges in rotorobo.txt: {len(treats_edges_in_rotorobo)}")
+        if treats_edges_in_rotorobo:
+            logger.info(f"Sample treats edge from rotorobo: {treats_edges_in_rotorobo[0]}")
+
+        # Check if first test edge exists in rotorobo
+        if test_edges:
+            first_test = test_edges[0]
+            first_test_subj, first_test_pred, first_test_obj = first_test
+            logger.info(f"Looking for first test edge in rotorobo:")
+            logger.info(f"  Test edge: ({first_test_subj}, {first_test_pred}, {first_test_obj})")
+            all_edges_set_temp = set(all_edges)
+            if first_test in all_edges_set_temp:
+                logger.info(f"  FOUND: Exact match in rotorobo.txt")
+            else:
+                logger.info(f"  NOT FOUND: No exact match in rotorobo.txt")
+                # Check for partial matches
+                matching = [(s, p, o) for s, p, o in all_edges if s == first_test_subj and o == first_test_obj]
+                if matching:
+                    logger.info(f"  However, found {len(matching)} edge(s) with same subject/object but different predicate:")
+                    for s, p, o in matching[:3]:
+                        logger.info(f"    ({s}, {p}, {o})")
+        logger.info("=" * 80)
+
         # Remove test edges from all edges to create train candidates
         logger.info("Creating train candidates by removing test edges from rotorobo.txt")
 
-        # Create a set of (subject, object) pairs from test edges to match against
-        # We only match on subject and object, NOT predicate, because predicate format differs
-        # between filtered TSV (biolink:treats) and rotorobo.txt (predicate IDs like R001)
-        logger.info("Matching test edges by (subject, object) pairs only (ignoring predicate format)")
-        test_edge_pairs = {(subj, obj) for subj, pred, obj in test_edges}
-        logger.info(f"Created {len(test_edge_pairs)} unique (subject, object) pairs from test edges")
+        # Create a set of test edges (full triples) for exact matching
+        # Now that predicates are converted to IDs, we can match full triples
+        logger.info("Matching test edges by full triples (subject, predicate, object)")
+        test_edge_set = set(test_edges)
+        logger.info(f"Created set of {len(test_edge_set)} unique test edges")
 
-        # Remove edges where (subject, object) matches a test edge AND predicate is in treats_predicates
+        # Remove edges that exactly match test edges
         train_candidates = []
         removed_count = 0
         for edge in all_edges:
-            subj, pred, obj = edge
-            # Remove if this is a test edge (matching subject/object) with a treats predicate
-            if (subj, obj) in test_edge_pairs and pred in treats_predicates:
+            # Remove if this edge exactly matches a test edge
+            if edge in test_edge_set:
                 removed_count += 1
             else:
                 train_candidates.append(edge)
@@ -410,12 +522,12 @@ def main():
 
             # Debug: check a few test edges to see what's going on
             logger.info("Debugging first 5 test edges:")
+            all_edges_set = set(all_edges)  # Convert to set for fast lookup
             for i, (subj, pred, obj) in enumerate(test_edges[:5]):
                 logger.info(f"  Test edge {i+1}: ({subj}, {pred}, {obj})")
-                # Check if this pair exists in rotorobo with treats predicate
-                matching_edges = [(s, p, o) for s, p, o in all_edges if s == subj and o == obj and p in treats_predicates]
-                if matching_edges:
-                    logger.info(f"    Found in rotorobo.txt with predicates: {[p for _, p, _ in matching_edges]}")
+                # Check if this exact edge exists in rotorobo
+                if (subj, pred, obj) in all_edges_set:
+                    logger.info(f"    Found exact match in rotorobo.txt")
                 else:
                     logger.info(f"    NOT found in rotorobo.txt")
 

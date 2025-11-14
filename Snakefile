@@ -180,14 +180,13 @@ rule filter_treats_with_drugmechdb:
 rule extract_drugmechdb_test:
     """
     Extract test edges from DrugMechDB-verified treats edges and remove them from rotorobo.txt
-    Note: Depends on dictionaries being generated (Step 1b) to ensure complete preprocessing
+    Uses rel_dict.txt to convert biolink predicates to predicate IDs for matching
     """
     input:
         subgraph = f"{BASE_DIR}/rotorobo.txt",
-        edge_map = f"{BASE_DIR}/edge_map.json",
+        edge_map = f"{BASE_DIR}/edge_map.json",  # Used for debug logging only
         filtered_tsv = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_treats_filtered.txt",
-        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
-        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"  # Required: maps biolink:treats to predicate IDs
     output:
         test = f"{BASE_DIR}/test.txt",
         train_candidates = f"{BASE_DIR}/train_candidates.txt",
@@ -203,6 +202,7 @@ rule extract_drugmechdb_test:
         python src/make_test_with_drugmechdb_treat.py \
             --input-dir {params.input_dir} \
             --filtered-tsv {input.filtered_tsv} \
+            --rel-dict-file processed/rel_dict.txt \
             --test-pct {params.test_pct} \
             --seed {params.seed} \
             --output-dir {params.input_dir} \
