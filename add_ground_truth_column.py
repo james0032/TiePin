@@ -5,8 +5,9 @@ Add a ground truth indicator column to TracIn CSV output.
 Matches training edges (TrainHead, TrainRel_label, TrainTail) against
 ground truth edges extracted from edges.jsonl.
 
-Also adds an "In_path" column to indicate if the training edge is part of
-the mechanistic path (connects test entities or intermediate nodes).
+Also adds path-related columns when mechanistic paths are provided:
+- "In_path": edge connects any nodes in the path (test entities + intermediates)
+- "On_specific_path": edge is on the specific sequential path from test head to tail
 """
 
 import argparse
@@ -159,6 +160,45 @@ def is_in_path(
     return train_head in path_nodes and train_tail in path_nodes
 
 
+def is_on_specific_path(
+    train_head: str,
+    train_tail: str,
+    test_head: str,
+    test_tail: str,
+    intermediate_nodes: List[str]
+) -> bool:
+    """Check if a training edge is on the specific sequential path from test_head to test_tail.
+
+    The mechanistic path is: test_head → intermediate[0] → intermediate[1] → ... → test_tail
+
+    An edge is on the specific path if it connects consecutive nodes in this sequence.
+
+    Args:
+        train_head: Training edge head entity
+        train_tail: Training edge tail entity
+        test_head: Test triple head entity (drug)
+        test_tail: Test triple tail entity (disease)
+        intermediate_nodes: Ordered list of intermediate nodes on the path
+
+    Returns:
+        True if edge is on the specific sequential path
+    """
+    # Build the full sequential path: [test_head, intermediate[0], ..., intermediate[n], test_tail]
+    path_sequence = [test_head] + intermediate_nodes + [test_tail]
+
+    # Check if (train_head, train_tail) or (train_tail, train_head) are consecutive in the path
+    for i in range(len(path_sequence) - 1):
+        node_a = path_sequence[i]
+        node_b = path_sequence[i + 1]
+
+        # Check both directions (graph is undirected)
+        if (train_head == node_a and train_tail == node_b) or \
+           (train_head == node_b and train_tail == node_a):
+            return True
+
+    return False
+
+
 def add_ground_truth_column(
     tracin_csv: str,
     ground_truth_jsonl: str,
@@ -186,6 +226,7 @@ def add_ground_truth_column(
     # Process CSV
     matched_count = 0
     in_path_count = 0
+    on_specific_path_count = 0
     total_rows = 0
 
     with open(tracin_csv, 'r') as f_in, open(output_csv, 'w') as f_out:
@@ -196,7 +237,7 @@ def add_ground_truth_column(
             if line_num == 1:
                 # Add new columns to header
                 if mechanistic_paths_csv:
-                    f_out.write(f"{line},IsGroundTruth,In_path\n")
+                    f_out.write(f"{line},IsGroundTruth,In_path,On_specific_path\n")
                 else:
                     f_out.write(f"{line},IsGroundTruth\n")
                 continue
@@ -216,7 +257,7 @@ def add_ground_truth_column(
                 logger.warning(f"Line {line_num}: Expected at least 14 fields, got {len(parts)}")
                 # Write original line with 0s
                 if mechanistic_paths_csv:
-                    f_out.write(f"{line},0,0\n")
+                    f_out.write(f"{line},0,0,0\n")
                 else:
                     f_out.write(f"{line},0\n")
                 continue
@@ -239,18 +280,24 @@ def add_ground_truth_column(
 
             # Check if edge is in mechanistic path
             in_path = 0
+            on_specific_path = 0
             if mechanistic_paths_csv:
                 # Look up intermediate nodes for this test triple
                 intermediate_nodes = mechanistic_paths.get((test_head, test_tail), [])
 
-                # Check if training edge is part of the path
+                # Check if training edge is part of the path (any edge between path nodes)
                 if is_in_path(train_head, train_tail, test_head, test_tail, intermediate_nodes):
                     in_path = 1
                     in_path_count += 1
 
+                # Check if training edge is on the specific sequential path
+                if is_on_specific_path(train_head, train_tail, test_head, test_tail, intermediate_nodes):
+                    on_specific_path = 1
+                    on_specific_path_count += 1
+
             # Write row with new columns
             if mechanistic_paths_csv:
-                f_out.write(f"{line},{is_ground_truth},{in_path}\n")
+                f_out.write(f"{line},{is_ground_truth},{in_path},{on_specific_path}\n")
             else:
                 f_out.write(f"{line},{is_ground_truth}\n")
 
@@ -259,6 +306,7 @@ def add_ground_truth_column(
 
     if mechanistic_paths_csv:
         logger.info(f"Found {in_path_count} edges in mechanistic paths ({in_path_count/total_rows*100:.2f}%)")
+        logger.info(f"Found {on_specific_path_count} edges on specific sequential path ({on_specific_path_count/total_rows*100:.2f}%)")
 
     logger.info(f"Output written to: {output_csv}")
 
@@ -270,6 +318,7 @@ def add_ground_truth_column(
 
     if mechanistic_paths_csv and in_path_count > 0:
         logger.info(f"✓ Found {in_path_count} training edges in mechanistic paths")
+        logger.info(f"✓ Found {on_specific_path_count} training edges on specific sequential path")
 
 
 def main():
@@ -284,12 +333,17 @@ Examples:
       --ground-truth ground_truth/drugmechdb_edges.jsonl \\
       --output dmdb_results/test_scores_tracin_with_gt.csv
 
-  # Add both ground truth and mechanistic path columns
+  # Add ground truth and path columns (In_path + On_specific_path)
   python add_ground_truth_column.py \\
       --tracin-csv dmdb_results/triple_000_CHEBI_17154_MONDO_0019975_tracin.csv \\
       --ground-truth ground_truth/drugmechdb_edges.jsonl \\
       --mechanistic-paths dedup_treats_mechanistic_paths.txt \\
       --output dmdb_results/triple_000_with_gt_and_path.csv
+
+  Output columns:
+    - IsGroundTruth: 1 if edge matches ground truth, 0 otherwise
+    - In_path: 1 if edge connects any nodes in the mechanistic path
+    - On_specific_path: 1 if edge is on the sequential path from drug to disease
 
   # Process multiple files
   python add_ground_truth_column.py \\

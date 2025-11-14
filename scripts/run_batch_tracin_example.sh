@@ -14,7 +14,7 @@ NODE_NAME_DICT="/workspace/data/robokop/CGGD_alltreat/processed/node_name_dict.t
 GRAPH_CACHE="/workspace/data/robokop/CGGD_alltreat/train_graph_cache.pkl"
 
 # Test triples file
-TEST_TRIPLES="/workspace/data/robokop/CGGD_alltreat/test_scores_top50.txt"
+TEST_TRIPLES="/workspace/data/robokop/CGGD_alltreat/scores_test_top50.txt"
 
 # Output directory
 OUTPUT_DIR="/workspace/data/robokop/CGGD_alltreat/results/batch_tracin_top50"
@@ -60,8 +60,8 @@ python batch_tracin_with_filtering.py \
     --edge-map "${EDGE_MAP}" \
     --node-name-dict "${NODE_NAME_DICT}" \
     --output-dir "${OUTPUT_DIR}" \
-    --n-hops 1 \
-    --min-degree 2 \
+    --n-hops 2 \
+    --min-degree 1 \
     --strict-hop-constraint \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
