@@ -244,7 +244,11 @@ def main():
         logger.info(f"Total keys in state_dict: {len(state_dict)}")
         logger.info("All state_dict keys:")
         for key in sorted(state_dict.keys()):
-            logger.info(f"  {key}: {state_dict[key].shape}")
+            value = state_dict[key]
+            if hasattr(value, 'shape'):
+                logger.info(f"  {key}: {value.shape}")
+            else:
+                logger.info(f"  {key}: {type(value)}")
 
         # Try different possible key names for entity embeddings
         entity_embedding_keys = [
