@@ -293,13 +293,58 @@ class ProximityFilterPyG:
 
         return distances
 
+    def _is_edge_on_drug_disease_path(
+        self,
+        src: int,
+        dst: int,
+        drug_distances: torch.Tensor,
+        disease_distances: torch.Tensor,
+        max_hops: int
+    ) -> bool:
+        """Check if an edge lies on a path between drug and disease within 2+2 hops.
+
+        An edge (src, dst) is on a valid path if:
+        - src is reachable from drug within max_hops AND dst is reachable from disease within max_hops
+        OR
+        - dst is reachable from drug within max_hops AND src is reachable from disease within max_hops
+
+        Args:
+            src: Source node of the edge
+            dst: Destination node of the edge
+            drug_distances: Hop distances from drug node(s)
+            disease_distances: Hop distances from disease node(s)
+            max_hops: Maximum hops allowed from each endpoint
+
+        Returns:
+            True if edge is on a valid drug-disease path
+        """
+        src_drug_dist = drug_distances[src].item()
+        src_disease_dist = disease_distances[src].item()
+        dst_drug_dist = drug_distances[dst].item()
+        dst_disease_dist = disease_distances[dst].item()
+
+        # Check if both nodes are reachable
+        if src_drug_dist < 0 or src_disease_dist < 0 or dst_drug_dist < 0 or dst_disease_dist < 0:
+            return False
+
+        # Path direction 1: drug -> src -> dst -> disease
+        # src must be within max_hops from drug, dst must be within max_hops from disease
+        path1_valid = (src_drug_dist <= max_hops and dst_disease_dist <= max_hops)
+
+        # Path direction 2: drug -> dst -> src -> disease
+        # dst must be within max_hops from drug, src must be within max_hops from disease
+        path2_valid = (dst_drug_dist <= max_hops and src_disease_dist <= max_hops)
+
+        return path1_valid or path2_valid
+
     def filter_for_single_test_triple(
         self,
         test_triple: Tuple[int, int, int],
         n_hops: int = 2,
         min_degree: int = 2,
         preserve_test_entity_edges: bool = True,
-        strict_hop_constraint: bool = False
+        strict_hop_constraint: bool = False,
+        path_filtering: bool = False
     ) -> np.ndarray:
         """Filter training triples for a single test triple using PyG.
 
@@ -310,6 +355,8 @@ class ProximityFilterPyG:
             preserve_test_entity_edges: If True, always keep edges with test entities
             strict_hop_constraint: If True, enforce that BOTH endpoints of each edge
                                   are within n_hops (prevents distant shortcuts)
+            path_filtering: If True, only keep edges on paths between drug and disease
+                           within n_hops+n_hops (stricter than intersection)
 
         Returns:
             Filtered training triples array
@@ -319,7 +366,7 @@ class ProximityFilterPyG:
 
         logger.info(f"Filtering for test triple: ({test_h}, {test_r}, {test_t})")
         logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}, "
-                   f"strict_hop_constraint={strict_hop_constraint}")
+                   f"strict_hop_constraint={strict_hop_constraint}, path_filtering={path_filtering}")
 
         # Get n-hop neighborhoods from head (drug) and tail (disease) separately
         logger.info("Computing n-hop neighborhood from head entity (drug)...")
@@ -361,10 +408,16 @@ class ProximityFilterPyG:
         combined_edge_index = torch.unique(combined_edge_index, dim=1)
         subset_edge_index = combined_edge_index
 
-        # Compute hop distances if strict mode is enabled
+        # Compute hop distances if strict mode or path filtering is enabled
         if strict_hop_constraint:
             hop_distances = self._compute_hop_distances([test_h, test_t], n_hops)
             logger.info(f"Computed hop distances in strict mode")
+
+        # Compute separate hop distances for path filtering
+        if path_filtering:
+            drug_distances = self._compute_hop_distances([test_h], n_hops)
+            disease_distances = self._compute_hop_distances([test_t], n_hops)
+            logger.info(f"Computed separate hop distances for drug and disease (path filtering mode)")
 
         # Compute degrees in subgraph
         subgraph_degrees = degree(subset_edge_index[0],
@@ -414,6 +467,14 @@ class ProximityFilterPyG:
                 if src_dist < 0 or src_dist > n_hops or dst_dist < 0 or dst_dist > n_hops:
                     should_keep = False
 
+            # PATH FILTERING: Only keep edges on paths between drug and disease
+            # This is stricter than intersection - edge must be on a valid path
+            if should_keep and path_filtering:
+                if not self._is_edge_on_drug_disease_path(
+                    src, dst, drug_distances, disease_distances, n_hops
+                ):
+                    should_keep = False
+
             # Add corresponding triple indices
             if should_keep:
                 # Find original triples for this edge
@@ -438,7 +499,8 @@ class ProximityFilterPyG:
         n_hops: int = 2,
         min_degree: int = 2,
         preserve_test_entity_edges: bool = True,
-        strict_hop_constraint: bool = False
+        strict_hop_constraint: bool = False,
+        path_filtering: bool = False
     ) -> np.ndarray:
         """Filter training triples for multiple test triples using PyG.
 
@@ -451,13 +513,15 @@ class ProximityFilterPyG:
             preserve_test_entity_edges: If True, always keep edges with test entities
             strict_hop_constraint: If True, enforce that BOTH endpoints of each edge
                                   are within n_hops (prevents distant shortcuts)
+            path_filtering: If True, only keep edges on paths between drug and disease
+                           within n_hops+n_hops (stricter than intersection)
 
         Returns:
             Filtered training triples array
         """
         logger.info(f"Filtering for {len(test_triples)} test triples")
         logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}, "
-                   f"strict_hop_constraint={strict_hop_constraint}")
+                   f"strict_hop_constraint={strict_hop_constraint}, path_filtering={path_filtering}")
 
         # Extract test entities - separate heads (drugs) and tails (diseases)
         head_entities = set()
@@ -519,6 +583,12 @@ class ProximityFilterPyG:
             hop_distances = self._compute_hop_distances(list(test_entities), n_hops)
             logger.info(f"Computed hop distances in strict mode")
 
+        # Compute separate hop distances for path filtering
+        if path_filtering:
+            drug_distances = self._compute_hop_distances(list(head_entities), n_hops)
+            disease_distances = self._compute_hop_distances(list(tail_entities), n_hops)
+            logger.info(f"Computed separate hop distances for drugs and diseases (path filtering mode)")
+
         # Compute degrees in subgraph
         subgraph_degrees = degree(subset_edge_index[0],
                                   num_nodes=len(self.node_degrees),
@@ -563,6 +633,14 @@ class ProximityFilterPyG:
 
                 # Skip if either endpoint is beyond n_hops or unreachable
                 if src_dist < 0 or src_dist > n_hops or dst_dist < 0 or dst_dist > n_hops:
+                    should_keep = False
+
+            # PATH FILTERING: Only keep edges on paths between drugs and diseases
+            # This is stricter than intersection - edge must be on a valid path
+            if should_keep and path_filtering:
+                if not self._is_edge_on_drug_disease_path(
+                    src, dst, drug_distances, disease_distances, n_hops
+                ):
                     should_keep = False
 
             if should_keep:
@@ -631,7 +709,8 @@ def filter_training_file(
     preserve_test_entity_edges: bool = True,
     use_single_triple_mode: bool = False,
     cache_path: Optional[str] = None,
-    strict_hop_constraint: bool = False
+    strict_hop_constraint: bool = False,
+    path_filtering: bool = False
 ):
     """Filter training file based on proximity to test triples using PyG.
 
@@ -645,6 +724,7 @@ def filter_training_file(
         use_single_triple_mode: If True, analyze first test triple only
         cache_path: Optional path to cache the graph object for reuse
         strict_hop_constraint: If True, enforce strict n-hop constraint
+        path_filtering: If True, only keep edges on paths between drug and disease
     """
     perf = PerformanceTracker()
     perf.start("TOTAL_EXECUTION")
@@ -729,7 +809,8 @@ def filter_training_file(
             n_hops=n_hops,
             min_degree=min_degree,
             preserve_test_entity_edges=preserve_test_entity_edges,
-            strict_hop_constraint=strict_hop_constraint
+            strict_hop_constraint=strict_hop_constraint,
+            path_filtering=path_filtering
         )
     else:
         logger.info("Using multiple test triples mode")
@@ -738,7 +819,8 @@ def filter_training_file(
             n_hops=n_hops,
             min_degree=min_degree,
             preserve_test_entity_edges=preserve_test_entity_edges,
-            strict_hop_constraint=strict_hop_constraint
+            strict_hop_constraint=strict_hop_constraint,
+            path_filtering=path_filtering
         )
     perf.end("6. Filter triples (k-hop subgraph + degree)")
 
@@ -855,6 +937,10 @@ Benefits of PyG version:
     parser.add_argument('--strict-hop-constraint', action='store_true',
                         help='Enforce strict n-hop constraint: both endpoints of each edge '
                              'must be within n_hops (prevents distant shortcuts)')
+    parser.add_argument('--path-filtering', action='store_true',
+                        help='Only keep edges on paths between drug and disease within n_hops+n_hops. '
+                             'This is stricter than intersection filtering - ensures edges lie on '
+                             'valid paths from drug to disease nodes.')
     parser.add_argument('--profile', action='store_true',
                         help='Enable detailed profiling with cProfile (outputs to profile.stats)')
 
@@ -880,7 +966,8 @@ Benefits of PyG version:
             preserve_test_entity_edges=args.preserve_test_edges,
             use_single_triple_mode=args.single_triple,
             cache_path=args.cache,
-            strict_hop_constraint=args.strict_hop_constraint
+            strict_hop_constraint=args.strict_hop_constraint,
+            path_filtering=args.path_filtering
         )
 
         profiler.disable()
@@ -909,5 +996,6 @@ Benefits of PyG version:
             preserve_test_entity_edges=args.preserve_test_edges,
             use_single_triple_mode=args.single_triple,
             cache_path=args.cache,
-            strict_hop_constraint=args.strict_hop_constraint
+            strict_hop_constraint=args.strict_hop_constraint,
+            path_filtering=args.path_filtering
         )
