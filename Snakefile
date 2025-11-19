@@ -21,9 +21,9 @@ Usage:
 configfile: "config.yaml"
 
 # Get style from config to use as base directory
-# All outputs will be organized under /workspace/data/robokop/{style}/
+# All outputs will be organized under {BASE_DIR}/{style}/
 STYLE = config.get("style", "CGGD_alltreat")
-BASE_DIR = f"/workspace/data/robokop/{STYLE}"
+BASE_DIR = f"{config['BASE_DIR']}/{STYLE}"
 
 # Define all final outputs
 rule all:

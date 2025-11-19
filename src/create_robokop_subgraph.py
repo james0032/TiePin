@@ -106,10 +106,10 @@ def keep_CCGGDD_alltreat(edge, typemap):
         return False
     accepted = [ ("biolink:ChemicalEntity", "biolink:DiseaseOrPhenotypicFeature"),
                 ("biolink:ChemicalEntity", "biolink:ChemicalEntity"),
-                ("biolink:ChemicalEntity", "biolink:Gene"),
-                ("biolink:Gene", "biolink:Gene"),
+                ("biolink:ChemicalEntity", "biolink:GeneOrGeneProduct"),
+                ("biolink:GeneOrGeneProduct", "biolink:GeneOrGeneProduct"),
                 ("biolink:DiseaseOrPhenotypicFeature", "biolink:DiseaseOrPhenotypicFeature"),
-                ("biolink:Gene", "biolink:DiseaseOrPhenotypicFeature")]
+                ("biolink:GeneOrGeneProduct", "biolink:DiseaseOrPhenotypicFeature")]
     return check_accepted(edge, typemap, accepted)
 
 def pred_trans(edge, edge_map):

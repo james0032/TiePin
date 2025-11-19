@@ -3,19 +3,27 @@
 # ============================================================================
 
 # ============================================================================
+# Base Directory Configuration
+# ============================================================================
+
+# Base directory for all data and outputs
+# All pipeline outputs will be organized under {BASE_DIR}/{style}/
+BASE_DIR: "/projects/aixb/jchung/everycure/influence_estimate/robokop"
+
+# ============================================================================
 # Input Data Configuration
 # ============================================================================
 
 # Path to the node JSONL file
-node_file: "/workspace/data/robokop/nodes.jsonl"
+node_file: "/projects/aixb/jchung/everycure/influence_estimate/robokop/nodes.jsonl"
 
 # Path to the edges JSONL file
-edges_file: "/workspace/data/robokop/edges.jsonl"
+edges_file: "/projects/aixb/jchung/everycure/influence_estimate/robokop/edges.jsonl"
 
 # Subgraph filtering style (determines output directory structure)
 # Valid options: original, CD, CCGGDD, CGGD, rCD, keepall, CGGD_alltreat
 # Output directory will be: /workspace/data/robokop/{style}/
-style: "CGGD_alltreat"
+style: "CCGGDD_alltreat"
 
 # ============================================================================
 # Mechanistic Paths Configuration

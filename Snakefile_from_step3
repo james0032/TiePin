@@ -1,0 +1,250 @@
+"""
+Snakemake pipeline for ConvE PyKEEN - Starting from Step 3 (Fixed Test Set)
+
+This pipeline assumes you already have:
+- rotorobo.txt (subgraph)
+- edge_map.json
+- test.txt (FIXED test set from previous run)
+- processed/node_dict.txt, node_name_dict.txt, rel_dict.txt
+
+Workflow:
+3. Create train_candidates.txt from rotorobo.txt and fixed test.txt
+4. Split train_candidates into train/valid
+5. Train ConvE model
+6. Evaluate model
+7. (Optional) Run TracIn analysis
+
+Usage:
+    snakemake --snakefile Snakefile_from_step3 --cores all
+    snakemake --snakefile Snakefile_from_step3 --cores all --configfile config.yaml
+    snakemake --snakefile Snakefile_from_step3 -n  # Dry run
+"""
+
+configfile: "config.yaml"
+
+# Get style from config to use as base directory
+# All outputs will be organized under {BASE_DIR}/{style}/
+STYLE = config.get("style", "CGGD_alltreat")
+BASE_DIR = f"{config['BASE_DIR']}/{STYLE}"
+
+# Define all final outputs
+rule all:
+    input:
+        # Train/valid split
+        f"{BASE_DIR}/train.txt",
+        f"{BASE_DIR}/valid.txt",
+        # Trained model (PyKEEN outputs)
+        f"{BASE_DIR}/models/conve/config.json",
+        # Evaluation results
+        f"{BASE_DIR}/results/evaluation/test_scores.json",
+        f"{BASE_DIR}/results/evaluation/test_scores_ranked.json"
+
+# ============================================================================
+# Step 3: Create Train Candidates from Fixed Test Set
+# ============================================================================
+
+rule create_train_candidates:
+    """
+    Create train_candidates.txt by removing fixed test edges from rotorobo.txt
+    This ensures the test set remains identical across multiple runs
+    """
+    input:
+        subgraph = f"{BASE_DIR}/rotorobo.txt",
+        test = f"{BASE_DIR}/test.txt"
+    output:
+        train_candidates = f"{BASE_DIR}/train_candidates.txt"
+    log:
+        f"{BASE_DIR}/logs/create_train_candidates.log"
+    shell:
+        """
+        python create_train_candidates.py \
+            --subgraph {input.subgraph} \
+            --test {input.test} \
+            --output {output.train_candidates} \
+            2>&1 | tee {log}
+        """
+
+# ============================================================================
+# Step 4: Split Data into Train/Valid
+# ============================================================================
+
+rule split_data:
+    """
+    Split train_candidates into training and validation sets
+    Note: test.txt is fixed and provided as input
+    """
+    input:
+        train_candidates = f"{BASE_DIR}/train_candidates.txt"
+    output:
+        train = f"{BASE_DIR}/train.txt",
+        valid = f"{BASE_DIR}/valid.txt",
+        stats = f"{BASE_DIR}/split_statistics.json"
+    params:
+        output_dir = BASE_DIR,
+        train_ratio = config.get("train_ratio", 0.9),
+        seed = config.get("random_seed", 42)
+    log:
+        f"{BASE_DIR}/logs/split_data.log"
+    shell:
+        """
+        python src/train_valid_split.py \
+            --input {input.train_candidates} \
+            --output-dir {params.output_dir} \
+            --train-ratio {params.train_ratio} \
+            --seed {params.seed} \
+            2>&1 | tee {log}
+        """
+
+# ============================================================================
+# Step 5: Train ConvE Model
+# ============================================================================
+
+rule train_model:
+    """
+    Train ConvE knowledge graph embedding model using PyKEEN
+    """
+    input:
+        train = f"{BASE_DIR}/train.txt",
+        valid = f"{BASE_DIR}/valid.txt",
+        test = f"{BASE_DIR}/test.txt",
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
+    output:
+        # PyKEEN outputs - model is saved in directory structure
+        model_dir = directory(f"{BASE_DIR}/models/conve"),
+        config_out = f"{BASE_DIR}/models/conve/config.json"
+    params:
+        output_dir = f"{BASE_DIR}/models/conve",
+        num_epochs = config.get("num_epochs", 100),
+        batch_size = config.get("batch_size", 256),
+        learning_rate = config.get("learning_rate", 0.001),
+        embedding_dim = config.get("embedding_dim", 200),
+        embedding_height = config.get("embedding_height", 10),
+        embedding_width = config.get("embedding_width", 20),
+        output_channels = config.get("output_channels", 32),
+        kernel_height = config.get("kernel_height", 3),
+        kernel_width = config.get("kernel_width", 3),
+        input_dropout = config.get("input_dropout", 0.2),
+        feature_map_dropout = config.get("feature_map_dropout", 0.2),
+        output_dropout = config.get("output_dropout", 0.3),
+        label_smoothing = config.get("label_smoothing", 0.1),
+        checkpoint_frequency = config.get("checkpoint_frequency", 2),
+        patience = config.get("patience", 10),
+        random_seed = config.get("random_seed", 42),
+        no_early_stopping = "" if config.get("early_stopping", True) else "--no-early-stopping",
+        gpu = "" if config.get("use_gpu", True) else "--no-gpu",
+        checkpoint_dir_arg = f"--checkpoint-dir {config.get('checkpoint_dir')}" if config.get("checkpoint_dir") else "",
+        skip_evaluation = "--skip-evaluation" if config.get("skip_evaluation", False) else ""
+    log:
+        f"{BASE_DIR}/logs/train_model.log"
+    resources:
+        gpu = 1 if config.get("use_gpu", True) else 0
+    shell:
+        """
+        python train.py \
+            --train {input.train} \
+            --valid {input.valid} \
+            --test {input.test} \
+            --entity-to-id {input.node_dict} \
+            --relation-to-id {input.rel_dict} \
+            --output-dir {params.output_dir} \
+            --num-epochs {params.num_epochs} \
+            --batch-size {params.batch_size} \
+            --learning-rate {params.learning_rate} \
+            --embedding-dim {params.embedding_dim} \
+            --embedding-height {params.embedding_height} \
+            --embedding-width {params.embedding_width} \
+            --output-channels {params.output_channels} \
+            --kernel-height {params.kernel_height} \
+            --kernel-width {params.kernel_width} \
+            --input-dropout {params.input_dropout} \
+            --feature-map-dropout {params.feature_map_dropout} \
+            --output-dropout {params.output_dropout} \
+            --label-smoothing {params.label_smoothing} \
+            --checkpoint-frequency {params.checkpoint_frequency} \
+            --patience {params.patience} \
+            --random-seed {params.random_seed} \
+            {params.checkpoint_dir_arg} \
+            {params.no_early_stopping} \
+            {params.skip_evaluation} \
+            {params.gpu} \
+            2>&1 | tee {log}
+        """
+
+# ============================================================================
+# Step 6: Evaluate Model (Score Test Triples)
+# ============================================================================
+
+rule evaluate_model:
+    """
+    Score test triples using trained ConvE model with score_only.py
+    """
+    input:
+        # Ensure training is complete
+        config_out = f"{BASE_DIR}/models/conve/config.json",
+        test = f"{BASE_DIR}/test.txt",
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt",
+        node_name_dict = f"{BASE_DIR}/processed/node_name_dict.txt",
+        rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
+    output:
+        scores_json = f"{BASE_DIR}/results/evaluation/test_scores.json",
+        scores_csv = f"{BASE_DIR}/results/evaluation/test_scores.csv",
+        scores_ranked_json = f"{BASE_DIR}/results/evaluation/test_scores_ranked.json",
+        scores_ranked_csv = f"{BASE_DIR}/results/evaluation/test_scores_ranked.csv"
+    params:
+        model_dir = f"{BASE_DIR}/models/conve",
+        output_dir = f"{BASE_DIR}/results/evaluation",
+        use_sigmoid = "--use-sigmoid" if config.get("use_sigmoid", False) else "",
+        top_n_arg = f"--top-n {config.get('top_n_triples')}" if config.get("top_n_triples") else "",
+        device = "cuda" if config.get("use_gpu", True) else "cpu"
+    log:
+        f"{BASE_DIR}/logs/evaluate_model.log"
+    shell:
+        """
+        mkdir -p {params.output_dir}
+
+        python score_only.py \
+            --model-dir {params.model_dir} \
+            --test {input.test} \
+            --entity-to-id {input.node_dict} \
+            --relation-to-id {input.rel_dict} \
+            --node-name-dict {input.node_name_dict} \
+            --output {output.scores_json} \
+            --device {params.device} \
+            {params.use_sigmoid} \
+            {params.top_n_arg} \
+            2>&1 | tee {log}
+        """
+
+# ============================================================================
+# Utility Rules
+# ============================================================================
+
+rule clean:
+    """
+    Remove generated files (keeps rotorobo.txt, test.txt, and dictionaries)
+    """
+    params:
+        base_dir = BASE_DIR
+    shell:
+        """
+        rm -f {params.base_dir}/train_candidates.txt
+        rm -f {params.base_dir}/train.txt
+        rm -f {params.base_dir}/valid.txt
+        rm -f {params.base_dir}/split_statistics.json
+        rm -rf {params.base_dir}/models
+        rm -rf {params.base_dir}/results/evaluation
+        rm -rf {params.base_dir}/logs
+        """
+
+rule clean_models:
+    """
+    Remove only trained models (keep data preprocessing)
+    """
+    params:
+        base_dir = BASE_DIR
+    shell:
+        """
+        rm -rf {params.base_dir}/models
+        rm -rf {params.base_dir}/results/evaluation
+        """
