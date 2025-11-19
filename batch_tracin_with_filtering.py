@@ -152,7 +152,10 @@ def run_tracin_analysis(
     device: str = 'cuda',
     use_last_layers: bool = False,
     num_last_layers: int = 2,
-    batch_size: int = 512
+    batch_size: int = 512,
+    use_mixed_precision: bool = False,
+    use_gradient_checkpointing: bool = False,
+    disable_memory_cleanup: bool = False
 ) -> bool:
     """Run TracIn analysis on a single test triple.
 
@@ -171,6 +174,9 @@ def run_tracin_analysis(
         use_last_layers: Whether to use last layers only (default: False = all layers)
         num_last_layers: Number of last layers to track when use_last_layers=True
         batch_size: Batch size for processing
+        use_mixed_precision: Use FP16 mixed precision (2x memory + 2x speed)
+        use_gradient_checkpointing: Use gradient checkpointing (2-3x memory reduction)
+        disable_memory_cleanup: Disable automatic memory cleanup
 
     Returns:
         True if successful, False otherwise
@@ -204,6 +210,16 @@ def run_tracin_analysis(
 
     if node_name_dict:
         cmd.extend(['--node-name-dict', node_name_dict])
+
+    # Add memory optimization flags
+    if use_mixed_precision:
+        cmd.append('--use-mixed-precision')
+
+    if use_gradient_checkpointing:
+        cmd.append('--use-gradient-checkpointing')
+
+    if disable_memory_cleanup:
+        cmd.append('--disable-memory-cleanup')
 
     logger.info(f"Running: {' '.join(cmd)}")
 
@@ -296,6 +312,14 @@ Example:
                         help='Only compute gradients for last layers (MUCH faster, following original TracIn paper)')
     parser.add_argument('--num-last-layers', type=int, default=2,
                         help='Number of last layers to track when --use-last-layers-only is set (default: 2)')
+
+    # Memory optimization arguments
+    parser.add_argument('--use-mixed-precision', action='store_true',
+                        help='Use FP16 mixed precision (2x memory + 2x speed). Recommended for GPUs with Tensor Cores.')
+    parser.add_argument('--use-gradient-checkpointing', action='store_true',
+                        help='Use gradient checkpointing (2-3x memory reduction, slight speed penalty)')
+    parser.add_argument('--disable-memory-cleanup', action='store_true',
+                        help='Disable automatic memory cleanup (tensor deletion and cache clearing)')
 
     # Execution control
     parser.add_argument('--start-index', type=int, default=0,
@@ -427,7 +451,10 @@ Example:
                 device=args.device,
                 use_last_layers=args.use_last_layers_only,
                 num_last_layers=args.num_last_layers,
-                batch_size=args.batch_size
+                batch_size=args.batch_size,
+                use_mixed_precision=args.use_mixed_precision,
+                use_gradient_checkpointing=args.use_gradient_checkpointing,
+                disable_memory_cleanup=args.disable_memory_cleanup
             )
 
             result['tracin_success'] = tracin_success

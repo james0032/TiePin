@@ -45,7 +45,10 @@ def run_tracin_analysis(
     use_last_layers_only: bool = False,
     last_layer_names: list = None,
     num_last_layers: int = 2,
-    csv_output: str = None
+    csv_output: str = None,
+    use_mixed_precision: bool = False,
+    use_gradient_checkpointing: bool = False,
+    enable_memory_cleanup: bool = True
 ):
     """Run TracIn analysis.
 
@@ -274,7 +277,10 @@ def run_tracin_analysis(
         device=device,
         use_last_layers_only=use_last_layers_only,
         last_layer_names=last_layer_names,
-        num_last_layers=num_last_layers
+        num_last_layers=num_last_layers,
+        use_mixed_precision=use_mixed_precision,
+        use_gradient_checkpointing=use_gradient_checkpointing,
+        enable_memory_cleanup=enable_memory_cleanup
     )
 
     # Log which parameters are being tracked
@@ -663,6 +669,20 @@ def parse_args():
         help='Specific layer names to track (optional, auto-detects if not provided)'
     )
 
+    # Memory optimization arguments
+    parser.add_argument(
+        '--use-mixed-precision', action='store_true',
+        help='Use FP16 mixed precision (2x memory + 2x speed). Recommended for GPUs with Tensor Cores.'
+    )
+    parser.add_argument(
+        '--use-gradient-checkpointing', action='store_true',
+        help='Use gradient checkpointing (2-3x memory reduction, slight speed penalty)'
+    )
+    parser.add_argument(
+        '--disable-memory-cleanup', action='store_true',
+        help='Disable automatic memory cleanup (tensor deletion and cache clearing)'
+    )
+
     return parser.parse_args()
 
 
@@ -698,7 +718,10 @@ def main():
         batch_size=args.batch_size,
         use_last_layers_only=args.use_last_layers_only,
         last_layer_names=args.last_layer_names,
-        csv_output=args.csv_output
+        csv_output=args.csv_output,
+        use_mixed_precision=args.use_mixed_precision,
+        use_gradient_checkpointing=args.use_gradient_checkpointing,
+        enable_memory_cleanup=not args.disable_memory_cleanup
     )
 
     logger.info("\nTracIn analysis completed!")

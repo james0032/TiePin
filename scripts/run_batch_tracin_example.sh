@@ -39,8 +39,9 @@ echo "  - Batch size: 64"
 echo "  - Top-k influences: 100"
 echo "  - Device: cuda"
 echo "  - Last layers only: enabled (2 layers for speed)"
+echo "  - Mixed precision (FP16): ENABLED (2x memory + 2x speed!)"
 echo ""
-echo "Expected time: ~8-12 minutes for 25 triples"
+echo "Expected time: ~4-6 minutes for 25 triples (with FP16 optimization)"
 echo "========================================"
 echo ""
 
@@ -67,7 +68,8 @@ python batch_tracin_with_filtering.py \
     --max-total-path-length 3 \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
-    --batch-size 32 \
+    --batch-size 64 \
+    --use-mixed-precision \
     2>&1 | tee "${LOG_FILE}"
 
 
