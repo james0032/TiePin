@@ -299,7 +299,8 @@ class ProximityFilterPyG:
         dst: int,
         drug_distances: torch.Tensor,
         disease_distances: torch.Tensor,
-        max_hops: int
+        max_hops: int,
+        max_total_path_length: int = None
     ) -> bool:
         """Check if an edge lies on a path between drug and disease within 2+2 hops.
 
@@ -320,6 +321,8 @@ class ProximityFilterPyG:
             drug_distances: Hop distances from drug node(s)
             disease_distances: Hop distances from disease node(s)
             max_hops: Maximum hops allowed from each endpoint
+            max_total_path_length: Maximum total path length (drug_dist + disease_dist).
+                                   If None, no total path length constraint is applied.
 
         Returns:
             True if edge is on a valid drug-disease path
@@ -344,9 +347,19 @@ class ProximityFilterPyG:
         # This ensures monotonic progression along the path
         path1_valid = (src_drug_dist <= dst_drug_dist and dst_disease_dist <= src_disease_dist)
 
+        # Check total path length for path1 if constraint is set
+        if path1_valid and max_total_path_length is not None:
+            path1_length = src_drug_dist + dst_disease_dist
+            path1_valid = path1_length <= max_total_path_length
+
         # Path direction 2: drug -> dst -> src -> disease
         # dst should be closer to drug, src should be closer to disease
         path2_valid = (dst_drug_dist <= src_drug_dist and src_disease_dist <= dst_disease_dist)
+
+        # Check total path length for path2 if constraint is set
+        if path2_valid and max_total_path_length is not None:
+            path2_length = dst_drug_dist + src_disease_dist
+            path2_valid = path2_length <= max_total_path_length
 
         return path1_valid or path2_valid
 
@@ -357,7 +370,8 @@ class ProximityFilterPyG:
         min_degree: int = 2,
         preserve_test_entity_edges: bool = True,
         strict_hop_constraint: bool = False,
-        path_filtering: bool = False
+        path_filtering: bool = False,
+        max_total_path_length: int = None
     ) -> np.ndarray:
         """Filter training triples for a single test triple using PyG.
 
@@ -370,6 +384,8 @@ class ProximityFilterPyG:
                                   are within n_hops (prevents distant shortcuts)
             path_filtering: If True, only keep edges on paths between drug and disease
                            within n_hops+n_hops (stricter than intersection)
+            max_total_path_length: Maximum total path length (drug_dist + disease_dist).
+                                   Only used when path_filtering=True. If None, allows up to n_hops+n_hops.
 
         Returns:
             Filtered training triples array
@@ -484,7 +500,7 @@ class ProximityFilterPyG:
             # This is stricter than intersection - edge must be on a valid path
             if should_keep and path_filtering:
                 if not self._is_edge_on_drug_disease_path(
-                    src, dst, drug_distances, disease_distances, n_hops
+                    src, dst, drug_distances, disease_distances, n_hops, max_total_path_length
                 ):
                     should_keep = False
 
@@ -513,7 +529,8 @@ class ProximityFilterPyG:
         min_degree: int = 2,
         preserve_test_entity_edges: bool = True,
         strict_hop_constraint: bool = False,
-        path_filtering: bool = False
+        path_filtering: bool = False,
+        max_total_path_length: int = None
     ) -> np.ndarray:
         """Filter training triples for multiple test triples using PyG.
 
@@ -528,6 +545,8 @@ class ProximityFilterPyG:
                                   are within n_hops (prevents distant shortcuts)
             path_filtering: If True, only keep edges on paths between drug and disease
                            within n_hops+n_hops (stricter than intersection)
+            max_total_path_length: Maximum total path length (drug_dist + disease_dist).
+                                   Only used when path_filtering=True. If None, allows up to n_hops+n_hops.
 
         Returns:
             Filtered training triples array
@@ -652,7 +671,7 @@ class ProximityFilterPyG:
             # This is stricter than intersection - edge must be on a valid path
             if should_keep and path_filtering:
                 if not self._is_edge_on_drug_disease_path(
-                    src, dst, drug_distances, disease_distances, n_hops
+                    src, dst, drug_distances, disease_distances, n_hops, max_total_path_length
                 ):
                     should_keep = False
 
@@ -723,7 +742,8 @@ def filter_training_file(
     use_single_triple_mode: bool = False,
     cache_path: Optional[str] = None,
     strict_hop_constraint: bool = False,
-    path_filtering: bool = False
+    path_filtering: bool = False,
+    max_total_path_length: int = None
 ):
     """Filter training file based on proximity to test triples using PyG.
 
@@ -738,6 +758,7 @@ def filter_training_file(
         cache_path: Optional path to cache the graph object for reuse
         strict_hop_constraint: If True, enforce strict n-hop constraint
         path_filtering: If True, only keep edges on paths between drug and disease
+        max_total_path_length: Maximum total path length when path_filtering is enabled
     """
     perf = PerformanceTracker()
     perf.start("TOTAL_EXECUTION")
@@ -823,7 +844,8 @@ def filter_training_file(
             min_degree=min_degree,
             preserve_test_entity_edges=preserve_test_entity_edges,
             strict_hop_constraint=strict_hop_constraint,
-            path_filtering=path_filtering
+            path_filtering=path_filtering,
+            max_total_path_length=max_total_path_length
         )
     else:
         logger.info("Using multiple test triples mode")
@@ -833,7 +855,8 @@ def filter_training_file(
             min_degree=min_degree,
             preserve_test_entity_edges=preserve_test_entity_edges,
             strict_hop_constraint=strict_hop_constraint,
-            path_filtering=path_filtering
+            path_filtering=path_filtering,
+            max_total_path_length=max_total_path_length
         )
     perf.end("6. Filter triples (k-hop subgraph + degree)")
 
@@ -954,6 +977,11 @@ Benefits of PyG version:
                         help='Only keep edges on paths between drug and disease within n_hops+n_hops. '
                              'This is stricter than intersection filtering - ensures edges lie on '
                              'valid paths from drug to disease nodes.')
+    parser.add_argument('--max-total-path-length', type=int, default=None,
+                        help='Maximum total path length (drug_dist + disease_dist). '
+                             'Only used when --path-filtering is enabled. '
+                             'Example: --max-total-path-length 3 limits to 3-hop paths. '
+                             'If not specified, allows up to n_hops+n_hops.')
     parser.add_argument('--profile', action='store_true',
                         help='Enable detailed profiling with cProfile (outputs to profile.stats)')
 
@@ -980,7 +1008,8 @@ Benefits of PyG version:
             use_single_triple_mode=args.single_triple,
             cache_path=args.cache,
             strict_hop_constraint=args.strict_hop_constraint,
-            path_filtering=args.path_filtering
+            path_filtering=args.path_filtering,
+            max_total_path_length=args.max_total_path_length
         )
 
         profiler.disable()
@@ -1010,5 +1039,6 @@ Benefits of PyG version:
             use_single_triple_mode=args.single_triple,
             cache_path=args.cache,
             strict_hop_constraint=args.strict_hop_constraint,
-            path_filtering=args.path_filtering
+            path_filtering=args.path_filtering,
+            max_total_path_length=args.max_total_path_length
         )

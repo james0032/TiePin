@@ -74,7 +74,8 @@ def filter_training_data(
     cache_path: str = None,
     preserve_test_edges: bool = True,
     strict_hop_constraint: bool = False,
-    path_filtering: bool = False
+    path_filtering: bool = False,
+    max_total_path_length: int = None
 ) -> bool:
     """Filter training data by proximity to test triple.
 
@@ -88,6 +89,7 @@ def filter_training_data(
         preserve_test_edges: Whether to preserve edges containing test entities
         strict_hop_constraint: Whether to enforce strict n-hop constraint
         path_filtering: Whether to only keep edges on paths between drug and disease
+        max_total_path_length: Maximum total path length when path_filtering is enabled
 
     Returns:
         True if successful, False otherwise
@@ -113,6 +115,9 @@ def filter_training_data(
 
     if path_filtering:
         cmd.append('--path-filtering')
+
+    if max_total_path_length is not None:
+        cmd.extend(['--max-total-path-length', str(max_total_path_length)])
 
     logger.info(f"Running: {' '.join(cmd)}")
 
@@ -274,6 +279,10 @@ Example:
     parser.add_argument('--path-filtering', action='store_true',
                         help='Only keep edges on paths between drug and disease within n_hops+n_hops '
                              '(stricter than intersection filtering)')
+    parser.add_argument('--max-total-path-length', type=int, default=None,
+                        help='Maximum total path length (drug_dist + disease_dist). '
+                             'Only used when --path-filtering is enabled. '
+                             'Example: --max-total-path-length 3 limits to 3-hop paths.')
 
     # TracIn parameters
     parser.add_argument('--top-k', type=int, default=None,
@@ -381,7 +390,8 @@ Example:
                 cache_path=args.cache,
                 preserve_test_edges=not args.no_preserve_test_edges,
                 strict_hop_constraint=args.strict_hop_constraint,
-                path_filtering=args.path_filtering
+                path_filtering=args.path_filtering,
+                max_total_path_length=args.max_total_path_length
             )
 
             result['filtering_success'] = filter_success

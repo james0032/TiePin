@@ -32,8 +32,9 @@ echo "Output directory: ${OUTPUT_DIR}"
 echo ""
 echo "Configuration:"
 echo "  - N-hops: 2"
-echo "  - Min degree: 2"
+echo "  - Min degree: 1"
 echo "  - Path filtering: enabled"
+echo "  - Max total path length: 3"
 echo "  - Batch size: 64"
 echo "  - Top-k influences: 100"
 echo "  - Device: cuda"
@@ -63,9 +64,10 @@ python batch_tracin_with_filtering.py \
     --n-hops 2 \
     --min-degree 1 \
     --path-filtering \
+    --max-total-path-length 3 \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
-    --batch-size 64 \
+    --batch-size 32 \
     2>&1 | tee "${LOG_FILE}"
 
 
