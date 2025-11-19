@@ -33,9 +33,8 @@ echo ""
 echo "Configuration:"
 echo "  - N-hops: 2"
 echo "  - Min degree: 2"
-echo "  - Strict hop constraint: enabled"
 echo "  - Path filtering: enabled"
-echo "  - Batch size: 16"
+echo "  - Batch size: 64"
 echo "  - Top-k influences: 100"
 echo "  - Device: cuda"
 echo "  - Last layers only: enabled (2 layers for speed)"
@@ -63,7 +62,6 @@ python batch_tracin_with_filtering.py \
     --output-dir "${OUTPUT_DIR}" \
     --n-hops 2 \
     --min-degree 1 \
-    --strict-hop-constraint \
     --path-filtering \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
