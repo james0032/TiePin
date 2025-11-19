@@ -303,10 +303,16 @@ class ProximityFilterPyG:
     ) -> bool:
         """Check if an edge lies on a path between drug and disease within 2+2 hops.
 
-        An edge (src, dst) is on a valid path if:
-        - src is reachable from drug within max_hops AND dst is reachable from disease within max_hops
-        OR
-        - dst is reachable from drug within max_hops AND src is reachable from disease within max_hops
+        An edge (src, dst) is on a valid path if it forms a monotonic progression
+        from drug to disease, meaning the distance increases as we go from drug to disease.
+
+        For an edge to be on a valid path:
+        - Path direction 1: drug -> ... -> src -> dst -> ... -> disease
+          where src_drug_dist < dst_drug_dist AND dst_disease_dist < src_disease_dist
+          (src is closer to drug, dst is closer to disease)
+        - OR Path direction 2: drug -> ... -> dst -> src -> ... -> disease
+          where dst_drug_dist < src_drug_dist AND src_disease_dist < dst_disease_dist
+          (dst is closer to drug, src is closer to disease)
 
         Args:
             src: Source node of the edge
@@ -327,13 +333,20 @@ class ProximityFilterPyG:
         if src_drug_dist < 0 or src_disease_dist < 0 or dst_drug_dist < 0 or dst_disease_dist < 0:
             return False
 
+        # Check if within hop limits
+        if src_drug_dist > max_hops or src_disease_dist > max_hops:
+            return False
+        if dst_drug_dist > max_hops or dst_disease_dist > max_hops:
+            return False
+
         # Path direction 1: drug -> src -> dst -> disease
-        # src must be within max_hops from drug, dst must be within max_hops from disease
-        path1_valid = (src_drug_dist <= max_hops and dst_disease_dist <= max_hops)
+        # src should be closer to drug, dst should be closer to disease
+        # This ensures monotonic progression along the path
+        path1_valid = (src_drug_dist <= dst_drug_dist and dst_disease_dist <= src_disease_dist)
 
         # Path direction 2: drug -> dst -> src -> disease
-        # dst must be within max_hops from drug, src must be within max_hops from disease
-        path2_valid = (dst_drug_dist <= max_hops and src_disease_dist <= max_hops)
+        # dst should be closer to drug, src should be closer to disease
+        path2_valid = (dst_drug_dist <= src_drug_dist and src_disease_dist <= dst_disease_dist)
 
         return path1_valid or path2_valid
 
