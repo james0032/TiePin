@@ -131,10 +131,9 @@ rule train_model:
         output_dropout = config.get("output_dropout", 0.3),
         label_smoothing = config.get("label_smoothing", 0.1),
         checkpoint_frequency = config.get("checkpoint_frequency", 2),
-        patience = config.get("patience", 10),
         random_seed = config.get("random_seed", 42),
         use_mixed_precision = "--use-mixed-precision" if config.get("use_mixed_precision", True) else "",
-        device = "cuda" if config.get("use_gpu", True) else "cpu"
+        no_gpu = "--no-gpu" if not config.get("use_gpu", True) else ""
     log:
         f"{BASE_DIR}/logs/train_model.log"
     resources:
@@ -162,10 +161,9 @@ rule train_model:
             --output-dropout {params.output_dropout} \
             --label-smoothing {params.label_smoothing} \
             --checkpoint-frequency {params.checkpoint_frequency} \
-            --patience {params.patience} \
             --random-seed {params.random_seed} \
-            --device {params.device} \
             {params.use_mixed_precision} \
+            {params.no_gpu} \
             2>&1 | tee {log}
         """
 
