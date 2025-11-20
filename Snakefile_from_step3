@@ -101,8 +101,7 @@ rule split_data:
 
 rule train_model:
     """
-    Train ConvE knowledge graph embedding model using train_pytorch.py
-    This generates checkpoint files compatible with TracIn analysis
+    Train ConvE knowledge graph embedding model using PyKEEN
     """
     input:
         train = f"{BASE_DIR}/train.txt",
@@ -111,10 +110,9 @@ rule train_model:
         node_dict = f"{BASE_DIR}/processed/node_dict.txt",
         rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
     output:
-        # train_pytorch.py outputs - checkpoints and model state
+        # PyKEEN outputs - model is saved in directory structure
         model_dir = directory(f"{BASE_DIR}/models/conve"),
         config_out = f"{BASE_DIR}/models/conve/config.json"
-        # Checkpoint files will be in checkpoints/ subdirectory
     params:
         output_dir = f"{BASE_DIR}/models/conve",
         num_epochs = config.get("num_epochs", 100),
@@ -131,16 +129,19 @@ rule train_model:
         output_dropout = config.get("output_dropout", 0.3),
         label_smoothing = config.get("label_smoothing", 0.1),
         checkpoint_frequency = config.get("checkpoint_frequency", 2),
+        patience = config.get("patience", 10),
         random_seed = config.get("random_seed", 42),
-        use_mixed_precision = "--use-mixed-precision" if config.get("use_mixed_precision", True) else "",
-        no_gpu = "--no-gpu" if not config.get("use_gpu", True) else ""
+        no_early_stopping = "" if config.get("early_stopping", True) else "--no-early-stopping",
+        gpu = "" if config.get("use_gpu", True) else "--no-gpu",
+        checkpoint_dir_arg = f"--checkpoint-dir {config.get('checkpoint_dir')}" if config.get("checkpoint_dir") else "",
+        skip_evaluation = "--skip-evaluation" if config.get("skip_evaluation", False) else ""
     log:
         f"{BASE_DIR}/logs/train_model.log"
     resources:
         gpu = 1 if config.get("use_gpu", True) else 0
     shell:
         """
-        python train_pytorch.py \
+        python train.py \
             --train {input.train} \
             --valid {input.valid} \
             --test {input.test} \
@@ -161,9 +162,12 @@ rule train_model:
             --output-dropout {params.output_dropout} \
             --label-smoothing {params.label_smoothing} \
             --checkpoint-frequency {params.checkpoint_frequency} \
+            --patience {params.patience} \
             --random-seed {params.random_seed} \
-            {params.use_mixed_precision} \
-            {params.no_gpu} \
+            {params.checkpoint_dir_arg} \
+            {params.no_early_stopping} \
+            {params.skip_evaluation} \
+            {params.gpu} \
             2>&1 | tee {log}
         """
 

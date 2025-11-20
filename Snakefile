@@ -44,11 +44,12 @@ rule all:
         f"{BASE_DIR}/processed/rel_dict.txt",
         # Trained model (PyKEEN outputs)
         f"{BASE_DIR}/models/conve/config.json",
+        # Note: test_results.json from train.py is optional (only if skip_evaluation=false)
         # Evaluation results (score_only.py outputs) - use this for reliable evaluation
         f"{BASE_DIR}/results/evaluation/test_scores.json",
         f"{BASE_DIR}/results/evaluation/test_scores_ranked.json"
-        # Note: TracIn analysis is enabled via train_pytorch.py
-        # Checkpoints are saved in models/conve/checkpoints/
+        # Note: TracIn analysis is disabled when using train.py (PyKEEN)
+        # To enable TracIn, use train_pytorch.py instead
 
 # ============================================================================
 # Step 1: Create ROBOKOP Subgraph
@@ -243,8 +244,7 @@ rule split_data:
 
 rule train_model:
     """
-    Train ConvE knowledge graph embedding model using train_pytorch.py
-    This generates checkpoint files compatible with TracIn analysis
+    Train ConvE knowledge graph embedding model using PyKEEN
     """
     input:
         train = f"{BASE_DIR}/train.txt",
@@ -253,10 +253,11 @@ rule train_model:
         node_dict = f"{BASE_DIR}/processed/node_dict.txt",
         rel_dict = f"{BASE_DIR}/processed/rel_dict.txt"
     output:
-        # train_pytorch.py outputs - checkpoints and model state
+        # PyKEEN outputs - model is saved in directory structure
         model_dir = directory(f"{BASE_DIR}/models/conve"),
         config_out = f"{BASE_DIR}/models/conve/config.json"
-        # Checkpoint files will be in checkpoints/ subdirectory
+        # Note: test_results.json is created only if skip_evaluation=false
+        # Use evaluate_model rule for separate evaluation
     params:
         output_dir = f"{BASE_DIR}/models/conve",
         num_epochs = config.get("num_epochs", 100),
@@ -273,16 +274,19 @@ rule train_model:
         output_dropout = config.get("output_dropout", 0.3),
         label_smoothing = config.get("label_smoothing", 0.1),
         checkpoint_frequency = config.get("checkpoint_frequency", 2),
+        patience = config.get("patience", 10),
         random_seed = config.get("random_seed", 42),
-        use_mixed_precision = "--use-mixed-precision" if config.get("use_mixed_precision", True) else "",
-        no_gpu = "--no-gpu" if not config.get("use_gpu", True) else ""
+        no_early_stopping = "" if config.get("early_stopping", True) else "--no-early-stopping",
+        gpu = "" if config.get("use_gpu", True) else "--no-gpu",
+        checkpoint_dir_arg = f"--checkpoint-dir {config.get('checkpoint_dir')}" if config.get("checkpoint_dir") else "",
+        skip_evaluation = "--skip-evaluation" if config.get("skip_evaluation", False) else ""
     log:
         f"{BASE_DIR}/logs/train_model.log"
     resources:
         gpu = 1 if config.get("use_gpu", True) else 0
     shell:
         """
-        python train_pytorch.py \
+        python train.py \
             --train {input.train} \
             --valid {input.valid} \
             --test {input.test} \
@@ -303,9 +307,12 @@ rule train_model:
             --output-dropout {params.output_dropout} \
             --label-smoothing {params.label_smoothing} \
             --checkpoint-frequency {params.checkpoint_frequency} \
+            --patience {params.patience} \
             --random-seed {params.random_seed} \
-            {params.use_mixed_precision} \
-            {params.no_gpu} \
+            {params.checkpoint_dir_arg} \
+            {params.no_early_stopping} \
+            {params.skip_evaluation} \
+            {params.gpu} \
             2>&1 | tee {log}
         """
 
@@ -356,11 +363,11 @@ rule evaluate_model:
         """
 
 # ============================================================================
-# Step 7: TracIn Analysis (ENABLED)
+# Step 7: TracIn Analysis (DISABLED - requires train_pytorch.py outputs)
 # ============================================================================
-# NOTE: TracIn analysis is now enabled since we're using train_pytorch.py.
-# Checkpoint files are saved in {BASE_DIR}/models/conve/checkpoints/
-# Run TracIn analysis separately using run_tracin.py or batch_tracin_with_filtering.py
+# NOTE: TracIn analysis requires checkpoint files from train_pytorch.py.
+# PyKEEN's train.py uses a different checkpoint format via callbacks.
+# To use TracIn, switch back to train_pytorch.py in the train_model rule.
 
 # ============================================================================
 # Utility Rules

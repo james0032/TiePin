@@ -270,32 +270,20 @@ class TracInAnalyzer:
 
         # Forward pass
         hr_batch = torch.LongTensor([[head, relation]]).to(self.device)
+        scores = self.model.score_t(hr_batch)  # Shape: (1, num_entities)
 
-        # Use mixed precision if enabled (2x speedup)
-        if self.use_mixed_precision:
-            device_type = self.device.split(':')[0] if ':' in self.device else self.device
-            with autocast(device_type=device_type):
-                scores = self.model.score_t(hr_batch)  # Shape: (1, num_entities)
-                score = scores[0, tail]
+        # Get score for the specific tail
+        score = scores[0, tail]
 
-                # Compute loss
-                if self.loss_fn == 'bce':
-                    target = torch.tensor([label], dtype=torch.float32, device=self.device)
-                    loss = F.binary_cross_entropy_with_logits(score.unsqueeze(0), target)
-                else:
-                    raise ValueError(f"Unknown loss function: {self.loss_fn}")
+        # Compute loss
+        if self.loss_fn == 'bce':
+            # Binary cross-entropy loss
+            target = torch.tensor([label], dtype=torch.float32, device=self.device)
+            loss = F.binary_cross_entropy_with_logits(score.unsqueeze(0), target)
         else:
-            scores = self.model.score_t(hr_batch)  # Shape: (1, num_entities)
-            score = scores[0, tail]
+            raise ValueError(f"Unknown loss function: {self.loss_fn}")
 
-            # Compute loss
-            if self.loss_fn == 'bce':
-                target = torch.tensor([label], dtype=torch.float32, device=self.device)
-                loss = F.binary_cross_entropy_with_logits(score.unsqueeze(0), target)
-            else:
-                raise ValueError(f"Unknown loss function: {self.loss_fn}")
-
-        # Backward pass (always FP32 for stability)
+        # Backward pass
         loss.backward()
 
         # Collect gradients (only for tracked parameters if specified)
@@ -553,18 +541,10 @@ class TracInAnalyzer:
         """
         logger.info(f"Computing influences for test triple: {test_triple}")
         logger.info(f"Using batch size: {batch_size} on device: {self.device}")
-
-        # Note: Vectorized gradients don't work with PyKEEN, so we fall back to sequential
-        logger.info("✓ Using optimized sequential gradient computation with FP16")
-
+        if self.use_vectorized_gradients:
+            logger.info("✓ Using VECTORIZED gradient computation (10-20x speedup!)")
         if self.cache_test_gradients:
             logger.info("✓ Using CACHED test gradients (1.5x speedup!)")
-
-        if self.use_mixed_precision:
-            logger.info("✓ Using mixed precision (FP16) for memory efficiency")
-
-        if hasattr(self.model, '_orig_mod'):  # torch.compile was applied
-            logger.info("✓ Model compiled with torch.compile")
 
         # OPTIMIZATION: Get test gradient from cache (or compute once)
         # This replaces: grad_test = self.compute_gradient(test_h, test_r, test_t, label=1.0)
