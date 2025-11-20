@@ -14,7 +14,7 @@ NODE_NAME_DICT="/projects/aixb/jchung/everycure/influence_estimate/robokop/CCGGD
 GRAPH_CACHE="/projects/aixb/jchung/everycure/influence_estimate/robokop/CCGGDD_alltreat/train_graph_cache.pkl"
 
 # Test triples file
-TEST_TRIPLES="/projects/aixb/jchung/everycure/influence_estimate/robokop/CCGGDD_alltreat/scores_test_top50.txt"
+TEST_TRIPLES="/projects/aixb/jchung/everycure/influence_estimate/robokop/CCGGDD_alltreat/scores_test_top50_from_CGGD.txt"
 
 # Output directory
 OUTPUT_DIR="/projects/aixb/jchung/everycure/influence_estimate/robokop/CCGGDD_alltreat/results/batch_tracin_top50"
