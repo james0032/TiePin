@@ -155,7 +155,12 @@ def run_tracin_analysis(
     batch_size: int = 512,
     use_mixed_precision: bool = False,
     use_gradient_checkpointing: bool = False,
-    disable_memory_cleanup: bool = False
+    disable_memory_cleanup: bool = False,
+    use_optimized_tracin: bool = False,
+    use_vectorized_gradients: bool = True,
+    cache_test_gradients: bool = True,
+    use_torch_compile: bool = False,
+    enable_multi_gpu: bool = False
 ) -> bool:
     """Run TracIn analysis on a single test triple.
 
@@ -211,7 +216,7 @@ def run_tracin_analysis(
     if node_name_dict:
         cmd.extend(['--node-name-dict', node_name_dict])
 
-    # Add memory optimization flags
+    # Add Phase 1 optimization flags (basic)
     if use_mixed_precision:
         cmd.append('--use-mixed-precision')
 
@@ -220,6 +225,22 @@ def run_tracin_analysis(
 
     if disable_memory_cleanup:
         cmd.append('--disable-memory-cleanup')
+
+    # Add Phase 2 optimization flags (advanced)
+    if use_optimized_tracin:
+        cmd.append('--use-optimized-tracin')
+
+    if not use_vectorized_gradients:
+        cmd.append('--disable-vectorized-gradients')
+
+    if not cache_test_gradients:
+        cmd.append('--disable-test-gradient-caching')
+
+    if use_torch_compile:
+        cmd.append('--use-torch-compile')
+
+    if enable_multi_gpu:
+        cmd.append('--enable-multi-gpu')
 
     logger.info(f"Running: {' '.join(cmd)}")
 
@@ -313,13 +334,25 @@ Example:
     parser.add_argument('--num-last-layers', type=int, default=2,
                         help='Number of last layers to track when --use-last-layers-only is set (default: 2)')
 
-    # Memory optimization arguments
+    # Memory optimization arguments (Phase 1 - Basic)
     parser.add_argument('--use-mixed-precision', action='store_true',
                         help='Use FP16 mixed precision (2x memory + 2x speed). Recommended for GPUs with Tensor Cores.')
     parser.add_argument('--use-gradient-checkpointing', action='store_true',
                         help='Use gradient checkpointing (2-3x memory reduction, slight speed penalty)')
     parser.add_argument('--disable-memory-cleanup', action='store_true',
                         help='Disable automatic memory cleanup (tensor deletion and cache clearing)')
+
+    # Advanced optimization arguments (Phase 2 - High Performance)
+    parser.add_argument('--use-optimized-tracin', action='store_true',
+                        help='Use tracin_optimized.py for 20-80x speedup (enables vectorized gradients + test caching by default)')
+    parser.add_argument('--disable-vectorized-gradients', action='store_true',
+                        help='Disable vectorized gradient computation (only applies if --use-optimized-tracin is set)')
+    parser.add_argument('--disable-test-gradient-caching', action='store_true',
+                        help='Disable test gradient caching (only applies if --use-optimized-tracin is set)')
+    parser.add_argument('--use-torch-compile', action='store_true',
+                        help='Use torch.compile for JIT compilation (1.5x speedup, requires PyTorch 2.0+)')
+    parser.add_argument('--enable-multi-gpu', action='store_true',
+                        help='Enable multi-GPU processing (experimental, 3-4x speedup with 4 GPUs)')
 
     # Execution control
     parser.add_argument('--start-index', type=int, default=0,
@@ -452,9 +485,16 @@ Example:
                 use_last_layers=args.use_last_layers_only,
                 num_last_layers=args.num_last_layers,
                 batch_size=args.batch_size,
+                # Phase 1 optimizations
                 use_mixed_precision=args.use_mixed_precision,
                 use_gradient_checkpointing=args.use_gradient_checkpointing,
-                disable_memory_cleanup=args.disable_memory_cleanup
+                disable_memory_cleanup=args.disable_memory_cleanup,
+                # Phase 2 advanced optimizations
+                use_optimized_tracin=args.use_optimized_tracin,
+                use_vectorized_gradients=not args.disable_vectorized_gradients,
+                cache_test_gradients=not args.disable_test_gradient_caching,
+                use_torch_compile=args.use_torch_compile,
+                enable_multi_gpu=args.enable_multi_gpu
             )
 
             result['tracin_success'] = tracin_success

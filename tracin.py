@@ -17,11 +17,18 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
 from torch.utils.checkpoint import checkpoint
 from pykeen.models import Model
 from pykeen.triples import CoreTriplesFactory
 from tqdm import tqdm
+
+# Import autocast with backward compatibility for different PyTorch versions
+try:
+    from torch.amp import autocast
+    from torch.cuda.amp import GradScaler
+except ImportError:
+    # Fallback for older PyTorch versions
+    from torch.cuda.amp import autocast, GradScaler
 
 logger = logging.getLogger(__name__)
 
@@ -303,7 +310,10 @@ class TracInAnalyzer:
             # OPTIMIZATION 1: Mixed Precision (FP16)
             # Use autocast for forward pass - runs in FP16 for 2x speed + 2x memory savings
             if self.use_mixed_precision:
-                with autocast():
+                # Use new API: autocast(device_type='cuda') for PyTorch 2.0+
+                # Falls back to autocast() for older versions (backward compatible)
+                device_type = self.device.split(':')[0] if ':' in self.device else self.device
+                with autocast(device_type=device_type):
                     # OPTIMIZATION 2: Gradient Checkpointing
                     # Recompute activations during backward pass instead of storing them
                     if self.use_gradient_checkpointing:

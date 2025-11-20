@@ -70,6 +70,8 @@ python batch_tracin_with_filtering.py \
     --device cuda \
     --batch-size 64 \
     --use-mixed-precision \
+    --use-optimized-tracin \
+    --use-torch-compile \
     2>&1 | tee "${LOG_FILE}"
 
 

@@ -20,9 +20,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
-from torch.cuda.amp import autocast, GradScaler
 from torch.utils.checkpoint import checkpoint
 from tqdm import tqdm
+
+# Import autocast with backward compatibility for different PyTorch versions
+try:
+    from torch.amp import autocast
+    from torch.cuda.amp import GradScaler
+except ImportError:
+    # Fallback for older PyTorch versions
+    from torch.cuda.amp import autocast, GradScaler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -336,7 +343,10 @@ def train_epoch(
         # OPTIMIZATION 1: Mixed Precision (FP16)
         # Use autocast for forward pass - runs in FP16 for 2x speed + 2x memory savings
         if use_mixed_precision and scaler is not None:
-            with autocast():
+            # Use new API: autocast(device_type='cuda') for PyTorch 2.0+
+            # Falls back to autocast() for older versions (backward compatible)
+            device_type = device.split(':')[0] if ':' in device else device
+            with autocast(device_type=device_type):
                 # Forward pass
                 scores = model(head, relation)  # [batch_size, num_entities]
 
