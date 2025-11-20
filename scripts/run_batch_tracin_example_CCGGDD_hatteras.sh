@@ -68,7 +68,7 @@ python batch_tracin_with_filtering.py \
     --max-total-path-length 3 \
     --cache "${GRAPH_CACHE}" \
     --device cuda \
-    --batch-size 64 \
+    --batch-size 128 \
     --use-mixed-precision \
     --use-optimized-tracin \
     --use-torch-compile \
