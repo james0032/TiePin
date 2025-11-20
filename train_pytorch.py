@@ -62,6 +62,7 @@ class ConvE(nn.Module):
         self.embedding_dim = embedding_dim
         self.embedding_height = embedding_height
         self.embedding_width = embedding_width
+        self.output_channels = output_channels  # Store for checkpoint saving
 
         # Embeddings
         self.entity_embeddings = nn.Embedding(num_entities, embedding_dim)
@@ -421,6 +422,7 @@ def save_checkpoint(
             'embedding_dim': model.embedding_dim,
             'embedding_height': model.embedding_height,
             'embedding_width': model.embedding_width,
+            'output_channels': model.output_channels,
         }
     }
 

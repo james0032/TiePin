@@ -167,7 +167,8 @@ def run_tracin_analysis(
         state_dict = checkpoint['model_state_dict']
         logger.info(f"Extracted model_state_dict with {len(state_dict)} keys")
 
-        config = checkpoint.get('config', {})
+        # Check both 'model_config' (train_pytorch.py format) and 'config' (legacy format)
+        config = checkpoint.get('model_config', checkpoint.get('config', {}))
         if config:
             embedding_dim = config.get('embedding_dim', embedding_dim)
             output_channels = config.get('output_channels', output_channels)
