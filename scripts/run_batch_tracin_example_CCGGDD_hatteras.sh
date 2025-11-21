@@ -35,11 +35,14 @@ echo "  - N-hops: 2"
 echo "  - Min degree: 1"
 echo "  - Path filtering: enabled"
 echo "  - Max total path length: 3"
-echo "  - Batch size: 64"
+echo "  - Batch size: 128"
 echo "  - Top-k influences: 100"
 echo "  - Device: cuda"
 echo "  - Last layers only: enabled (2 layers for speed)"
 echo "  - Mixed precision (FP16): ENABLED (2x memory + 2x speed!)"
+echo "  - Optimized TracIn: ENABLED (20-40x faster with vectorized gradients + test caching!)"
+echo "  - Torch compile: ENABLED (1.5x additional speedup)"
+echo "  - Resume mode: ENABLED (skips already completed triples)"
 echo ""
 echo "Expected time: ~4-6 minutes for 25 triples (with FP16 optimization)"
 echo "========================================"
@@ -72,6 +75,7 @@ python batch_tracin_with_filtering.py \
     --use-mixed-precision \
     --use-optimized-tracin \
     --use-torch-compile \
+    --skip-existing \
     2>&1 | tee "${LOG_FILE}"
 
 

@@ -41,6 +41,7 @@ echo "  - Device: cuda"
 echo "  - Last layers only: enabled (2 layers for speed)"
 echo "  - Mixed precision (FP16): ENABLED (2x memory + 2x speed!)"
 echo "  - Optimized TracIn: ENABLED (20-40x faster with vectorized gradients + test caching!)"
+echo "  - Resume mode: ENABLED (skips already completed triples)"
 echo ""
 echo "Expected time: ~1-2 minutes for 25 triples (with ALL optimizations)"
 echo "========================================"
@@ -72,6 +73,7 @@ python batch_tracin_with_filtering.py \
     --batch-size 64 \
     --use-mixed-precision \
     --use-optimized-tracin \
+    --skip-existing \
     2>&1 | tee "${LOG_FILE}"
 
 
