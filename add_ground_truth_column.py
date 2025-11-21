@@ -81,10 +81,21 @@ def load_mechanistic_paths(csv_file: str) -> Dict[Tuple[str, str], List[str]]:
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
 
+        # Log available columns for debugging
+        fieldnames = reader.fieldnames
+        logger.debug(f"CSV columns found: {fieldnames}")
+
         for row_num, row in enumerate(reader, 1):
             drug = row.get('Drug', '').strip()
             disease = row.get('Disease', '').strip()
-            intermediate_nodes_str = row.get('[Intermediate Nodes]', '').strip()
+
+            # Try multiple possible column names for intermediate nodes
+            intermediate_nodes_str = (
+                row.get('[Intermediate Nodes]', '') or
+                row.get('Intermediate_Nodes', '') or
+                row.get('Intermediate Nodes', '') or
+                row.get('[Intermediate_Nodes]', '')
+            ).strip()
 
             if not drug or not disease:
                 logger.warning(f"Row {row_num}: Missing Drug or Disease")
@@ -92,8 +103,8 @@ def load_mechanistic_paths(csv_file: str) -> Dict[Tuple[str, str], List[str]]:
 
             # Parse intermediate nodes list
             try:
-                # Handle empty list
-                if intermediate_nodes_str == '[]':
+                # Handle empty string or empty list
+                if not intermediate_nodes_str or intermediate_nodes_str == '[]':
                     intermediate_nodes = []
                 else:
                     # Remove brackets and split by comma

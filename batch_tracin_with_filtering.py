@@ -266,7 +266,9 @@ def main():
         description='Batch TracIn analysis with training data filtering',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Example:
+Examples:
+
+  # Basic usage
   python batch_tracin_with_filtering.py \\
       --test-triples examples/20251017_top_test_triples.txt \\
       --model-path model.pt \\
@@ -277,6 +279,30 @@ Example:
       --node-name-dict node_name_dict.txt \\
       --output-dir results/batch_tracin \\
       --n-hops 2 \\
+      --device cuda
+
+  # Resume from checkpoint (skip already processed triples)
+  python batch_tracin_with_filtering.py \\
+      --test-triples examples/20251017_top_test_triples.txt \\
+      --model-path model.pt \\
+      --train train.txt \\
+      --entity-to-id entity_to_id.tsv \\
+      --relation-to-id relation_to_id.tsv \\
+      --output-dir results/batch_tracin \\
+      --skip-existing \\
+      --device cuda
+
+  # Process specific range (e.g., triples 100-200)
+  python batch_tracin_with_filtering.py \\
+      --test-triples examples/20251017_top_test_triples.txt \\
+      --model-path model.pt \\
+      --train train.txt \\
+      --entity-to-id entity_to_id.tsv \\
+      --relation-to-id relation_to_id.tsv \\
+      --output-dir results/batch_tracin \\
+      --start-index 100 \\
+      --max-triples 100 \\
+      --skip-existing \\
       --device cuda
         """
     )
@@ -363,6 +389,8 @@ Example:
                         help='Skip filtering step (use existing filtered files)')
     parser.add_argument('--skip-tracin', action='store_true',
                         help='Skip TracIn step (only do filtering)')
+    parser.add_argument('--skip-existing', action='store_true',
+                        help='Skip triples that already have output CSV files (resume from checkpoint)')
 
     args = parser.parse_args()
 
@@ -420,6 +448,25 @@ Example:
         filtered_train_file = filtered_dir / f"{base_name}_filtered_train.txt"
         output_json = output_dir / f"{base_name}_tracin.json"
         output_csv = output_dir / f"{base_name}_tracin.csv"
+
+        # Check if output already exists (checkpoint/resume functionality)
+        if args.skip_existing and output_csv.exists():
+            logger.info(f"✓ Output already exists: {output_csv}")
+            logger.info(f"  Skipping triple {triple_idx} (use --no-skip-existing to force re-run)")
+            summary['skipped'] += 1
+            result = {
+                'index': triple_idx,
+                'triple': {'head': head, 'relation': rel, 'tail': tail},
+                'base_name': base_name,
+                'filtering_success': True,
+                'tracin_success': True,
+                'filtered_train_file': str(filtered_train_file),
+                'output_csv': str(output_csv),
+                'skipped': True,
+                'reason': 'output_exists'
+            }
+            summary['results'].append(result)
+            continue
 
         result = {
             'index': triple_idx,
@@ -526,13 +573,16 @@ Example:
     logger.info("=" * 80)
     logger.info("BATCH PROCESSING COMPLETE")
     logger.info("=" * 80)
-    logger.info(f"Total triples processed: {summary['total_triples']}")
-    logger.info(f"Successful: {summary['successful']}")
+    logger.info(f"Total triples in batch: {summary['total_triples']}")
+    logger.info(f"Successful (new): {summary['successful']}")
+    logger.info(f"Skipped (existing): {summary['skipped']}")
     logger.info(f"Failed (filtering): {summary['failed_filtering']}")
     logger.info(f"Failed (TracIn): {summary['failed_tracin']}")
-    logger.info(f"Skipped: {summary['skipped']}")
     logger.info(f"Elapsed time: {summary['elapsed_time_formatted']}")
     logger.info(f"Summary saved to: {summary_file}")
+    if args.skip_existing:
+        logger.info(f"\n✓ Resume mode enabled (--skip-existing)")
+        logger.info(f"  Total completed (new + existing): {summary['successful'] + summary['skipped']}")
     logger.info("=" * 80)
 
     # Print output file locations
