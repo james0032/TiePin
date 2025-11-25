@@ -72,6 +72,7 @@ import gzip
 import json
 import argparse
 import os
+import csv
 from collections import defaultdict
 import torch
 from torch_geometric.data import Data
@@ -490,13 +491,18 @@ def save_results(results, output_file='treats_mechanistic_paths.json', output_di
 def save_results_txt(results, output_txt='treats_mechanistic_paths.txt', output_dir='.'):
     """Save mechanistic paths to a .txt file in the format:
        Drug, Disease, [list of intermediate nodes in the mechanistic path]
+       Uses proper CSV formatting with quoting for list values.
     """
     output_path = os.path.join(output_dir, output_txt)
     print(f"\n{'='*70}")
     print(f"Saving simplified results to {output_path}...")
 
-    with open(output_path, 'w') as f:
-        f.write("Drug,Disease,[Intermediate Nodes]\n")
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+
+        # Write header
+        writer.writerow(['Drug', 'Disease', '[Intermediate Nodes]'])
+
         for r in results:
             drug = r['treats_edge']['subject']
             disease = r['treats_edge']['object']
@@ -507,7 +513,7 @@ def save_results_txt(results, output_txt='treats_mechanistic_paths.txt', output_
                 else:
                     intermediates = []
                 intermediates_str = "[" + ", ".join(intermediates) + "]"
-                f.write(f"{drug},{disease},{intermediates_str}\n")
+                writer.writerow([drug, disease, intermediates_str])
 
     file_size_kb = os.path.getsize(output_path) / 1024
     print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB)")
@@ -520,6 +526,7 @@ def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_
     from all mechanistic paths into a single list (union).
 
     Format: Drug,Disease,[Intermediate Nodes]
+    Uses proper CSV formatting with quoting for list values.
     """
     output_path = os.path.join(output_dir, output_txt)
     print(f"\n{'='*70}")
@@ -544,35 +551,42 @@ def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_
                 pair_to_intermediates[pair].update(intermediates)
 
     # Write deduplicated results
-    with open(output_path, 'w') as f:
-        f.write("Drug,Disease,[Intermediate Nodes]\n")
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+
+        # Write header
+        writer.writerow(['Drug', 'Disease', '[Intermediate Nodes]'])
 
         # Sort by drug, then disease for consistent output
         for (drug, disease) in sorted(pair_to_intermediates.keys()):
             intermediates = sorted(pair_to_intermediates[(drug, disease)])
             intermediates_str = "[" + ", ".join(intermediates) + "]"
-            f.write(f"{drug},{disease},{intermediates_str}\n")
+            writer.writerow([drug, disease, intermediates_str])
 
     file_size_kb = os.path.getsize(output_path) / 1024
 
     total_pairs = len(pair_to_intermediates)
     pairs_with_intermediates = sum(1 for nodes in pair_to_intermediates.values() if nodes)
 
-    print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB)")
+    print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB}")
     print(f"  Total unique drug-disease pairs: {total_pairs}")
     print(f"  Pairs with intermediate nodes: {pairs_with_intermediates}")
 
 def save_path_id_results(results, output_txt='drugmechdb_path_id_results.txt', output_dir='.'):
     """Save results grouped by drugmechdb_path_id to a .txt file.
 
-    Format: Drug,Disease,[Intermediate Nodes],drugmechdb_path_id
+    Format: Drug,Disease,Intermediate_Nodes,drugmechdb_path_id
+    Uses proper CSV formatting with quoting for list values.
     """
     output_path = os.path.join(output_dir, output_txt)
     print(f"\n{'='*70}")
     print(f"Saving path_id-based results to {output_path}...")
 
-    with open(output_path, 'w') as f:
-        f.write("Drug,Disease,Intermediate_Nodes,drugmechdb_path_id\n")
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+
+        # Write header
+        writer.writerow(['Drug', 'Disease', 'Intermediate_Nodes', 'drugmechdb_path_id'])
 
         for r in results:
             drug = r['drug']
@@ -583,7 +597,7 @@ def save_path_id_results(results, output_txt='drugmechdb_path_id_results.txt', o
             # Format intermediate nodes as a list string
             intermediates_str = "[" + ", ".join(intermediates) + "]" if intermediates else "[]"
 
-            f.write(f"{drug},{disease},{intermediates_str},{path_id}\n")
+            writer.writerow([drug, disease, intermediates_str, path_id])
 
     file_size_kb = os.path.getsize(output_path) / 1024
 

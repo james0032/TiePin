@@ -109,14 +109,19 @@ def load_mechanistic_paths(csv_file: str) -> Dict[Tuple[str, str], List[str]]:
                 else:
                     # Remove brackets and split by comma
                     # Format is: "[CHEBI:17154, MONDO:0019975]"
-                    if intermediate_nodes_str.startswith('[') and intermediate_nodes_str.endswith(']'):
-                        # Remove brackets
-                        nodes_str = intermediate_nodes_str[1:-1].strip()
-                        if nodes_str:
-                            # Split by comma and strip whitespace
-                            intermediate_nodes = [node.strip() for node in nodes_str.split(',')]
-                        else:
+                    if intermediate_nodes_str.startswith('['):
+                        # Check if closing bracket is missing (data quality issue)
+                        if not intermediate_nodes_str.endswith(']'):
+                            logger.warning(f"Row {row_num}: Malformed intermediate nodes (missing closing bracket): '{intermediate_nodes_str}' - treating as empty")
                             intermediate_nodes = []
+                        else:
+                            # Remove brackets
+                            nodes_str = intermediate_nodes_str[1:-1].strip()
+                            if nodes_str:
+                                # Split by comma and strip whitespace
+                                intermediate_nodes = [node.strip() for node in nodes_str.split(',')]
+                            else:
+                                intermediate_nodes = []
                     else:
                         # Try ast.literal_eval as fallback for properly quoted strings
                         intermediate_nodes = ast.literal_eval(intermediate_nodes_str)
@@ -126,7 +131,7 @@ def load_mechanistic_paths(csv_file: str) -> Dict[Tuple[str, str], List[str]]:
                 paths[(drug, disease)] = intermediate_nodes
 
             except (ValueError, SyntaxError) as e:
-                logger.warning(f"Row {row_num}: Failed to parse intermediate nodes '{intermediate_nodes_str}': {e}")
+                logger.warning(f"Row {row_num}: Failed to parse intermediate nodes '{intermediate_nodes_str}': {e} - treating as empty")
                 paths[(drug, disease)] = []
 
     logger.info(f"Loaded {len(paths)} mechanistic paths")
