@@ -102,7 +102,7 @@ spec:
       limits:
         cpu: '3'
         memory: 248G
-        ephemeral-storage: 4Gi
+        ephemeral-storage: 2Gi
         # GPU - uncomment the one you need:
         #nvidia.com/mig-1g.5gb: 1
         #nvidia.com/mig-2g.10gb: 1
@@ -143,6 +143,6 @@ spec:
       path: /aixb/jchung
   - name: workspace
     emptyDir:
-      sizeLimit: 100Gi
+      sizeLimit: 3000Gi
 
   restartPolicy: Never

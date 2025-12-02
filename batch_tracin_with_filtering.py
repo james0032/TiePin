@@ -77,7 +77,7 @@ def filter_training_data(
     path_filtering: bool = False,
     max_total_path_length: int = None
 ) -> bool:
-    """Filter training data by proximity to test triple.
+    """Filter training data by proximity to test triple using PyG.
 
     Args:
         train_file: Path to training triples
@@ -135,6 +135,74 @@ def filter_training_data(
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"Filtering failed: {e}")
+        return False
+
+
+def filter_training_data_networkx(
+    train_file: str,
+    test_triple_file: str,
+    output_file: str,
+    n_hops: int = 2,
+    min_degree: int = 2,
+    preserve_test_edges: bool = True,
+    strict_hop_constraint: bool = False,
+    path_filtering: bool = False,
+    max_total_path_length: int = None
+) -> bool:
+    """Filter training data by proximity to test triple using NetworkX.
+
+    Args:
+        train_file: Path to training triples
+        test_triple_file: Path to single test triple file
+        output_file: Path to write filtered training data
+        n_hops: Number of hops for proximity filtering
+        min_degree: Minimum degree threshold
+        preserve_test_edges: Whether to preserve edges containing test entities
+        strict_hop_constraint: Whether to enforce strict n-hop constraint
+        path_filtering: Whether to only keep edges on paths between drug and disease
+        max_total_path_length: Maximum total path length when path_filtering is enabled
+
+    Returns:
+        True if successful, False otherwise
+    """
+    cmd = [
+        'python', 'filter_training_networkx.py',
+        '--train', train_file,
+        '--test', test_triple_file,
+        '--output', output_file,
+        '--n-hops', str(n_hops),
+        '--min-degree', str(min_degree),
+        '--single-triple'
+    ]
+
+    if not preserve_test_edges:
+        cmd.append('--no-preserve-test-edges')
+
+    if strict_hop_constraint:
+        cmd.append('--strict-hop-constraint')
+
+    if path_filtering:
+        cmd.append('--path-filtering')
+
+    if max_total_path_length is not None:
+        cmd.extend(['--max-total-path-length', str(max_total_path_length)])
+
+    logger.info(f"Running NetworkX filter: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            # Let stdout/stderr pass through to console (don't capture)
+            # This allows real-time log viewing
+            stdout=None,  # Inherit stdout
+            stderr=None,  # Inherit stderr
+            text=True
+        )
+        logger.info("NetworkX filtering completed successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"NetworkX filtering failed: {e}")
         return False
 
 
@@ -268,7 +336,7 @@ def main():
         epilog="""
 Examples:
 
-  # Basic usage
+  # Basic usage with PyG filtering (default, fastest)
   python batch_tracin_with_filtering.py \\
       --test-triples examples/20251017_top_test_triples.txt \\
       --model-path model.pt \\
@@ -279,6 +347,19 @@ Examples:
       --node-name-dict node_name_dict.txt \\
       --output-dir results/batch_tracin \\
       --n-hops 2 \\
+      --device cuda
+
+  # Use NetworkX filtering (more transparent, easier to debug)
+  python batch_tracin_with_filtering.py \\
+      --test-triples examples/20251017_top_test_triples.txt \\
+      --model-path model.pt \\
+      --train train.txt \\
+      --entity-to-id entity_to_id.tsv \\
+      --relation-to-id relation_to_id.tsv \\
+      --output-dir results/batch_tracin \\
+      --filter-method networkx \\
+      --n-hops 2 \\
+      --path-filtering \\
       --device cuda
 
   # Resume from checkpoint (skip already processed triples)
@@ -328,12 +409,16 @@ Examples:
                         help='Path to node_name_dict.txt (optional)')
 
     # Filtering parameters
+    parser.add_argument('--filter-method', type=str, default='pyg',
+                        choices=['pyg', 'networkx'],
+                        help='Filtering implementation to use: pyg (PyTorch Geometric, faster) or '
+                             'networkx (more transparent, easier to debug) (default: pyg)')
     parser.add_argument('--n-hops', type=int, default=2,
                         help='Number of hops for proximity filtering (default: 2)')
     parser.add_argument('--min-degree', type=int, default=2,
                         help='Minimum degree threshold (default: 2)')
     parser.add_argument('--cache', type=str,
-                        help='Path to cache graph (optional, speeds up filtering)')
+                        help='Path to cache graph (optional, speeds up PyG filtering only)')
     parser.add_argument('--no-preserve-test-edges', action='store_true',
                         help='Do not preserve edges containing test entities')
     parser.add_argument('--strict-hop-constraint', action='store_true',
@@ -425,6 +510,7 @@ Examples:
         'failed_filtering': 0,
         'failed_tracin': 0,
         'skipped': 0,
+        'filter_method': args.filter_method,
         'results': []
     }
 
@@ -484,21 +570,37 @@ Examples:
 
         # Step 2: Filter training data
         if not args.skip_filtering:
-            logger.info("Step 1/2: Filtering training data...")
-            filter_success = filter_training_data(
-                train_file=args.train,
-                test_triple_file=str(temp_triple_file),
-                output_file=str(filtered_train_file),
-                n_hops=args.n_hops,
-                min_degree=args.min_degree,
-                cache_path=args.cache,
-                preserve_test_edges=not args.no_preserve_test_edges,
-                strict_hop_constraint=args.strict_hop_constraint,
-                path_filtering=args.path_filtering,
-                max_total_path_length=args.max_total_path_length
-            )
+            logger.info(f"Step 1/2: Filtering training data using {args.filter_method.upper()}...")
+
+            # Choose filtering method
+            if args.filter_method == 'networkx':
+                filter_success = filter_training_data_networkx(
+                    train_file=args.train,
+                    test_triple_file=str(temp_triple_file),
+                    output_file=str(filtered_train_file),
+                    n_hops=args.n_hops,
+                    min_degree=args.min_degree,
+                    preserve_test_edges=not args.no_preserve_test_edges,
+                    strict_hop_constraint=args.strict_hop_constraint,
+                    path_filtering=args.path_filtering,
+                    max_total_path_length=args.max_total_path_length
+                )
+            else:  # pyg
+                filter_success = filter_training_data(
+                    train_file=args.train,
+                    test_triple_file=str(temp_triple_file),
+                    output_file=str(filtered_train_file),
+                    n_hops=args.n_hops,
+                    min_degree=args.min_degree,
+                    cache_path=args.cache,
+                    preserve_test_edges=not args.no_preserve_test_edges,
+                    strict_hop_constraint=args.strict_hop_constraint,
+                    path_filtering=args.path_filtering,
+                    max_total_path_length=args.max_total_path_length
+                )
 
             result['filtering_success'] = filter_success
+            result['filter_method'] = args.filter_method
 
             if not filter_success:
                 logger.error(f"Filtering failed for triple {triple_idx}")
@@ -573,6 +675,7 @@ Examples:
     logger.info("=" * 80)
     logger.info("BATCH PROCESSING COMPLETE")
     logger.info("=" * 80)
+    logger.info(f"Filter method: {summary['filter_method'].upper()}")
     logger.info(f"Total triples in batch: {summary['total_triples']}")
     logger.info(f"Successful (new): {summary['successful']}")
     logger.info(f"Skipped (existing): {summary['skipped']}")

@@ -31,6 +31,7 @@ echo "Test triples: ${TEST_TRIPLES}"
 echo "Output directory: ${OUTPUT_DIR}"
 echo ""
 echo "Configuration:"
+echo "  - Filter method: NetworkX (transparent, easy to debug)"
 echo "  - N-hops: 2"
 echo "  - Min degree: 1"
 echo "  - Path filtering: enabled"
@@ -64,11 +65,11 @@ python batch_tracin_with_filtering.py \
     --edge-map "${EDGE_MAP}" \
     --node-name-dict "${NODE_NAME_DICT}" \
     --output-dir "${OUTPUT_DIR}" \
+    --filter-method networkx \
     --n-hops 2 \
     --min-degree 1 \
     --path-filtering \
     --max-total-path-length 3 \
-    --cache "${GRAPH_CACHE}" \
     --device cuda \
     --batch-size 64 \
     --use-mixed-precision \

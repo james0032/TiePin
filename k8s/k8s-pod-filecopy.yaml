@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: conve-pykeen-file
+  labels:
+    app: conve-pykeen
+    type: filing
+spec:
+  securityContext:
+    runAsUser: 1449
+    runAsGroup: 1187
+    fsGroup: 1187
+
+  containers:
+  - name: conve-pykeen
+    image: nvcr.io/nvidia/pyg:24.05-py3
+    tty: true
+    stdin: true
+    command: ["/bin/bash"]
+    
+    resources:
+      limits:
+        cpu: '1'
+        memory: 6G
+        ephemeral-storage: 1Gi
+        # GPU - uncomment the one you need:
+        #nvidia.com/mig-1g.5gb: 1
+        #nvidia.com/mig-2g.10gb: 1
+        #nvidia.com/mig-3g.20gb: 1
+        #nvidia.com/mig-7g.40gb: 1
+      requests:
+        cpu: '1'
+        memory: 6G
+        ephemeral-storage: 1Gi
+
+    volumeMounts:
+    - name: storage
+      mountPath: "/workspace/data"
+    - name: nfs
+      mountPath: "/projects/aixb/jchung"
+    - name: workspace
+      mountPath: "/workspace"
+
+    
+
+
+  volumes:
+  - name: storage
+    persistentVolumeClaim:
+      claimName: nn-geo-storage
+  - name: nfs
+    nfs:
+      server: na-projects.edc.renci.org
+      path: /aixb/jchung
+  - name: workspace
+    emptyDir:
+      sizeLimit: 100Gi
+
+  restartPolicy: Never
