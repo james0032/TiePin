@@ -72,6 +72,7 @@ python batch_tracin_with_filtering.py \
     --min-degree 1 \
     --path-filtering \
     --max-total-path-length 3 \
+    --strict-path-filtering \
     --device cuda \
     --batch-size 32 \
     --use-mixed-precision \

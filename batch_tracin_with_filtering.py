@@ -216,7 +216,8 @@ def filter_training_data_igraph(
     preserve_test_edges: bool = True,
     strict_hop_constraint: bool = False,
     path_filtering: bool = False,
-    max_total_path_length: int = None
+    max_total_path_length: int = None,
+    strict_path_filtering: bool = False
 ) -> bool:
     """Filter training data by proximity to test triple using igraph.
 
@@ -231,6 +232,7 @@ def filter_training_data_igraph(
         strict_hop_constraint: Whether to enforce strict n-hop constraint
         path_filtering: Whether to only keep edges on paths between drug and disease
         max_total_path_length: Maximum total path length when path_filtering is enabled
+        strict_path_filtering: If True, ONLY keep edges on paths (ignores other rules)
 
     Returns:
         True if successful, False otherwise
@@ -255,6 +257,9 @@ def filter_training_data_igraph(
 
     if max_total_path_length is not None:
         cmd.extend(['--max-total-path-length', str(max_total_path_length)])
+
+    if strict_path_filtering:
+        cmd.append('--strict-path-filtering')
 
     logger.info(f"Running igraph filter: {' '.join(cmd)}")
 
@@ -517,6 +522,9 @@ Examples:
                         help='Maximum total path length (drug_dist + disease_dist). '
                              'Only used when --path-filtering is enabled. '
                              'Example: --max-total-path-length 3 limits to 3-hop paths.')
+    parser.add_argument('--strict-path-filtering', action='store_true',
+                        help='ONLY keep edges on paths (ignores degree and test entity edge rules). '
+                             'Requires --path-filtering to be enabled.')
 
     # TracIn parameters
     parser.add_argument('--top-k', type=int, default=None,
@@ -682,7 +690,8 @@ Examples:
                     preserve_test_edges=not args.no_preserve_test_edges,
                     strict_hop_constraint=args.strict_hop_constraint,
                     path_filtering=args.path_filtering,
-                    max_total_path_length=args.max_total_path_length
+                    max_total_path_length=args.max_total_path_length,
+                    strict_path_filtering=args.strict_path_filtering
                 )
             else:  # pyg
                 filter_success = filter_training_data(

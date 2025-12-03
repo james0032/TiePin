@@ -278,7 +278,8 @@ class IGraphProximityFilter:
         min_degree: int = 2,
         preserve_test_entity_edges: bool = True,
         path_filtering: bool = False,
-        max_total_path_length: int = None
+        max_total_path_length: int = None,
+        strict_path_filtering: bool = False
     ) -> Tuple[np.ndarray, Dict]:
         """Filter training triples based on proximity to test triples.
 
@@ -289,13 +290,14 @@ class IGraphProximityFilter:
             preserve_test_entity_edges: Always keep edges with test entities
             path_filtering: Only keep edges on paths between drugs and diseases
             max_total_path_length: Maximum total path length (optional)
+            strict_path_filtering: If True, ONLY keep edges on paths (ignores other rules)
 
         Returns:
             Tuple of (filtered_triples, diagnostics_dict)
         """
         logger.info(f"Filtering for {len(test_triples)} test triples")
         logger.info(f"Parameters: n_hops={n_hops}, min_degree={min_degree}, "
-                   f"path_filtering={path_filtering}")
+                   f"path_filtering={path_filtering}, strict_path_filtering={strict_path_filtering}")
 
         # Separate drugs (heads) and diseases (tails)
         drug_nodes = list(set(int(h) for h, r, t in test_triples))
@@ -358,25 +360,37 @@ class IGraphProximityFilter:
 
             should_keep = False
 
-            # Rule 1: Preserve test entity edges
-            if preserve_test_entity_edges:
-                if src in test_entities or dst in test_entities:
-                    should_keep = True
-
-            # Rule 2: Check degree threshold
-            if not should_keep:
-                src_degree = degrees[src]
-                dst_degree = degrees[dst]
-
-                if src_degree >= min_degree or dst_degree >= min_degree:
-                    should_keep = True
-
-            # Rule 3: Path filtering - check if edge is on enumerated paths
-            if should_keep and path_filtering:
-                if edges_on_paths is not None:
+            # Strict path filtering mode: ONLY keep edges on paths
+            if strict_path_filtering:
+                if path_filtering and edges_on_paths is not None:
                     edge_tuple = (min(src, dst), max(src, dst))
-                    if edge_tuple not in edges_on_paths:
-                        should_keep = False
+                    if edge_tuple in edges_on_paths:
+                        should_keep = True
+                else:
+                    # Strict mode requires path_filtering to be enabled
+                    logger.warning("strict_path_filtering=True but path_filtering=False, no edges will be kept!")
+            else:
+                # Normal filtering mode: Apply rules in order
+
+                # Rule 1: Preserve test entity edges
+                if preserve_test_entity_edges:
+                    if src in test_entities or dst in test_entities:
+                        should_keep = True
+
+                # Rule 2: Check degree threshold
+                if not should_keep:
+                    src_degree = degrees[src]
+                    dst_degree = degrees[dst]
+
+                    if src_degree >= min_degree or dst_degree >= min_degree:
+                        should_keep = True
+
+                # Rule 3: Path filtering - check if edge is on enumerated paths
+                if should_keep and path_filtering:
+                    if edges_on_paths is not None:
+                        edge_tuple = (min(src, dst), max(src, dst))
+                        if edge_tuple not in edges_on_paths:
+                            should_keep = False
 
             # Add triple indices if keeping this edge
             if should_keep:
@@ -459,10 +473,16 @@ def load_or_create_mappings_cache(
     Returns:
         Tuple of (entity_to_idx, idx_to_entity, relation_to_idx, train_numeric, test_numeric)
     """
-    # Try to load from cache first
+    # Try to load mappings from cache first
+    entity_to_idx = None
+    idx_to_entity = None
+    relation_to_idx = None
+    train_numeric = None
+    cache_loaded = False
+
     if cache_path and Path(cache_path).exists():
         try:
-            logger.info(f"Loading mappings and numeric triples from cache: {cache_path}")
+            logger.info(f"Loading mappings and train numeric from cache: {cache_path}")
             with open(cache_path, 'rb') as f:
                 cache_data = pickle.load(f)
 
@@ -470,66 +490,70 @@ def load_or_create_mappings_cache(
             idx_to_entity = cache_data['idx_to_entity']
             relation_to_idx = cache_data['relation_to_idx']
             train_numeric = cache_data['train_numeric']
-            test_numeric = cache_data['test_numeric']
+            cache_loaded = True
 
             logger.info(f"Loaded from cache: {len(entity_to_idx)} entities, "
                        f"{len(relation_to_idx)} relations, "
-                       f"{len(train_numeric)} train triples, "
-                       f"{len(test_numeric)} test triples")
-
-            return entity_to_idx, idx_to_entity, relation_to_idx, train_numeric, test_numeric
+                       f"{len(train_numeric)} train triples")
 
         except Exception as e:
             logger.warning(f"Failed to load mappings cache: {e}")
             logger.info("Rebuilding mappings...")
+            entity_to_idx = None
+            cache_loaded = False
 
-    # Load triples from files
-    logger.info(f"Loading training triples from {train_file}")
-    train_triples = load_triples_from_file(train_file)
-
+    # Load test triples (always loaded fresh, never cached)
     logger.info(f"Loading test triples from {test_file}")
     test_triples = load_triples_from_file(test_file)
 
-    logger.info(f"Loaded {len(train_triples)} training, {len(test_triples)} test triples")
+    # If mappings not in cache, build them
+    if entity_to_idx is None:
+        logger.info(f"Loading training triples from {train_file}")
+        train_triples = load_triples_from_file(train_file)
 
-    # Create mappings
-    logger.info("Creating entity/relation mappings...")
-    entity_to_idx, idx_to_entity, relation_to_idx = create_entity_mappings(
-        train_triples, test_triples
-    )
-    logger.info(f"Entities: {len(entity_to_idx)}, Relations: {len(relation_to_idx)}")
+        logger.info(f"Loaded {len(train_triples)} training, {len(test_triples)} test triples")
 
-    # Convert to numeric
-    logger.info("Converting triples to numeric format...")
-    train_numeric = np.array([
-        [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
-        for h, r, t in train_triples
-    ])
+        # Create mappings
+        logger.info("Creating entity/relation mappings...")
+        entity_to_idx, idx_to_entity, relation_to_idx = create_entity_mappings(
+            train_triples, test_triples
+        )
+        logger.info(f"Entities: {len(entity_to_idx)}, Relations: {len(relation_to_idx)}")
 
+        # Convert training to numeric
+        logger.info("Converting training triples to numeric format...")
+        train_numeric = np.array([
+            [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
+            for h, r, t in train_triples
+        ])
+    else:
+        logger.info(f"Using cached mappings for {len(test_triples)} test triples")
+
+    # Always convert test triples to numeric (never cached)
     test_numeric = np.array([
         [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
         for h, r, t in test_triples
     ])
 
-    # Save to cache if path provided
-    if cache_path:
+    # Save to cache if we just built the mappings (not loaded from cache)
+    if cache_path and not cache_loaded and entity_to_idx is not None:
         try:
             logger.info(f"Saving mappings to cache: {cache_path}")
             cache_dir = Path(cache_path).parent
             cache_dir.mkdir(parents=True, exist_ok=True)
 
+            # NOTE: We do NOT cache test_numeric because it changes in batch processing
             cache_data = {
                 'entity_to_idx': entity_to_idx,
                 'idx_to_entity': idx_to_entity,
                 'relation_to_idx': relation_to_idx,
-                'train_numeric': train_numeric,
-                'test_numeric': test_numeric
+                'train_numeric': train_numeric
             }
 
             with open(cache_path, 'wb') as f:
                 pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-            logger.info(f"Mappings cache saved successfully")
+            logger.info(f"Mappings cache saved successfully (test triples NOT cached)")
 
         except Exception as e:
             logger.warning(f"Failed to save mappings cache: {e}")
@@ -559,6 +583,8 @@ def main():
                        help='Only keep edges on paths between drug and disease')
     parser.add_argument('--max-total-path-length', type=int, default=None,
                        help='Maximum total path length (drug_dist + disease_dist)')
+    parser.add_argument('--strict-path-filtering', action='store_true',
+                       help='ONLY keep edges on paths (ignores degree and test entity edge rules)')
     parser.add_argument('--cache', type=str, default=None,
                        help='Path to cache file for graph (speeds up repeated runs)')
     parser.add_argument('--mappings-cache', type=str, default=None,
@@ -591,7 +617,8 @@ def main():
         min_degree=args.min_degree,
         preserve_test_entity_edges=args.preserve_test_edges,
         path_filtering=args.path_filtering,
-        max_total_path_length=args.max_total_path_length
+        max_total_path_length=args.max_total_path_length,
+        strict_path_filtering=args.strict_path_filtering
     )
 
     elapsed = time.time() - start_time
