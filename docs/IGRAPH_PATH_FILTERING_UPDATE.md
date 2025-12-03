@@ -127,10 +127,13 @@ The `path_stats` dictionary provides:
 | Feature | igraph | NetworkX |
 |---------|--------|----------|
 | **Path enumeration** | `graph.get_all_simple_paths(src, to=dst, cutoff=n)` | `nx.all_simple_paths(graph, src, dst, cutoff=n)` |
+| **Distance calculation** | `graph.distances(source=src)` (no cutoff) | `nx.single_source_shortest_path_length(graph, src, cutoff=n)` |
 | **Return type** | List of vertex ID lists | Generator of node lists |
 | **Graph reference** | Method on graph object | Function taking graph as arg |
 | **Performance** | Faster (C implementation) | Slower (pure Python) |
 | **Installation** | `pip install igraph` | `pip install networkx` |
+
+**Important Note**: igraph's `distances()` method doesn't support a `cutoff` parameter. We compute all distances and filter by `max_hops` afterward. This is still efficient due to igraph's C implementation.
 
 ## Usage
 

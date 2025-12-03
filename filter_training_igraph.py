@@ -92,8 +92,9 @@ class IGraphProximityFilter:
                 continue
 
             # Get shortest path lengths from this source
-            # cutoff parameter limits the search depth
-            source_distances = self.graph.distances(source=source, cutoff=max_hops)[0]
+            # igraph's distances() doesn't support cutoff, so we get all distances
+            # and filter by max_hops
+            source_distances = self.graph.distances(source=source)[0]
 
             # Process distances (igraph returns inf for unreachable nodes)
             for node_id, dist in enumerate(source_distances):
