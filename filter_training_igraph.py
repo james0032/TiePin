@@ -208,9 +208,25 @@ class IGraphProximityFilter:
                 # Find all simple paths up to cutoff length
                 # igraph's get_all_simple_paths returns paths as lists of vertex IDs
                 try:
-                    paths = self.graph.get_all_simple_paths(
-                        drug, to=disease, cutoff=max_path_length
-                    )
+                    # Try different parameter names depending on igraph version
+                    paths = None
+                    try:
+                        # Try 'cutoff' parameter (igraph >= 0.10.x)
+                        paths = self.graph.get_all_simple_paths(
+                            drug, to=disease, cutoff=max_path_length
+                        )
+                    except TypeError:
+                        try:
+                            # Try 'maxlen' parameter (some igraph versions)
+                            paths = self.graph.get_all_simple_paths(
+                                drug, to=disease, maxlen=max_path_length
+                            )
+                        except TypeError:
+                            # Fallback: Get all paths and filter by length manually
+                            all_paths_no_cutoff = self.graph.get_all_simple_paths(
+                                drug, to=disease
+                            )
+                            paths = [p for p in all_paths_no_cutoff if len(p) - 1 <= max_path_length]
 
                     if paths:
                         pairs_with_paths += 1
