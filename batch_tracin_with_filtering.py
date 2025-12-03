@@ -212,6 +212,7 @@ def filter_training_data_igraph(
     output_file: str,
     n_hops: int = 2,
     min_degree: int = 2,
+    cache_path: str = None,
     preserve_test_edges: bool = True,
     strict_hop_constraint: bool = False,
     path_filtering: bool = False,
@@ -225,6 +226,7 @@ def filter_training_data_igraph(
         output_file: Path to write filtered training data
         n_hops: Number of hops for proximity filtering
         min_degree: Minimum degree threshold
+        cache_path: Optional path to cached graph
         preserve_test_edges: Whether to preserve edges containing test entities
         strict_hop_constraint: Whether to enforce strict n-hop constraint
         path_filtering: Whether to only keep edges on paths between drug and disease
@@ -241,6 +243,9 @@ def filter_training_data_igraph(
         '--n-hops', str(n_hops),
         '--min-degree', str(min_degree)
     ]
+
+    if cache_path:
+        cmd.extend(['--cache', cache_path])
 
     if preserve_test_edges:
         cmd.append('--preserve-test-edges')
@@ -673,6 +678,7 @@ Examples:
                     output_file=str(filtered_train_file),
                     n_hops=args.n_hops,
                     min_degree=args.min_degree,
+                    cache_path=args.cache,
                     preserve_test_edges=not args.no_preserve_test_edges,
                     strict_hop_constraint=args.strict_hop_constraint,
                     path_filtering=args.path_filtering,

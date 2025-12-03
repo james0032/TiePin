@@ -66,6 +66,7 @@ python batch_tracin_with_filtering.py \
     --node-name-dict "${NODE_NAME_DICT}" \
     --output-dir "${OUTPUT_DIR}" \
     --filter-method igraph \
+    --cache "${GRAPH_CACHE}" \
     --n-hops 2 \
     --min-degree 1 \
     --path-filtering \

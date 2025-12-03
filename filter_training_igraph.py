@@ -9,12 +9,13 @@ Installation: pip install igraph
 
 import logging
 import argparse
-from typing import List, Set, Tuple, Dict
+from typing import List, Set, Tuple, Dict, Optional
 from pathlib import Path
 import numpy as np
 import igraph as ig
 from collections import defaultdict
 import time
+import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -22,16 +23,28 @@ logger = logging.getLogger(__name__)
 class IGraphProximityFilter:
     """Filter training triples using igraph."""
 
-    def __init__(self, training_triples: np.ndarray):
+    def __init__(self, training_triples: np.ndarray, cache_path: Optional[str] = None):
         """Initialize with training triples.
 
         Args:
             training_triples: Array of shape (N, 3) with [head, relation, tail]
+            cache_path: Optional path to cached graph file
         """
         self.training_triples = training_triples
         self.graph = None
         self.edge_to_triples = defaultdict(list)
+
+        # Try to load from cache first
+        if cache_path and Path(cache_path).exists():
+            if self._load_graph_cache(cache_path):
+                return
+
+        # Build graph if cache not available
         self._build_graph()
+
+        # Save to cache if path provided
+        if cache_path:
+            self._save_graph_cache(cache_path)
 
     def _build_graph(self):
         """Build igraph graph from training triples."""
@@ -69,6 +82,48 @@ class IGraphProximityFilter:
 
         logger.info(f"Built igraph graph: {self.graph.vcount()} nodes, "
                    f"{self.graph.ecount()} edges")
+
+    def _save_graph_cache(self, cache_path: str):
+        """Save graph and edge mapping to cache file.
+
+        Args:
+            cache_path: Path to save cache file
+        """
+        try:
+            cache_data = {
+                'graph': self.graph,
+                'edge_to_triples': dict(self.edge_to_triples)
+            }
+            with open(cache_path, 'wb') as f:
+                pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            logger.info(f"Saved graph cache to {cache_path}")
+            logger.info(f"  Nodes: {self.graph.vcount()}, Edges: {self.graph.ecount()}")
+        except Exception as e:
+            logger.warning(f"Failed to save graph cache: {e}")
+
+    def _load_graph_cache(self, cache_path: str) -> bool:
+        """Load graph and edge mapping from cache file.
+
+        Args:
+            cache_path: Path to cache file
+
+        Returns:
+            True if loaded successfully, False otherwise
+        """
+        try:
+            logger.info(f"Loading graph from cache: {cache_path}")
+            with open(cache_path, 'rb') as f:
+                cache_data = pickle.load(f)
+
+            self.graph = cache_data['graph']
+            self.edge_to_triples = defaultdict(list, cache_data['edge_to_triples'])
+
+            logger.info(f"Loaded graph from cache successfully")
+            logger.info(f"  Nodes: {self.graph.vcount()}, Edges: {self.graph.ecount()}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to load graph cache: {e}")
+            return False
 
     def compute_hop_distances_from_nodes(
         self,
@@ -389,6 +444,99 @@ def create_entity_mappings(train_triples: List, test_triples: List) -> Tuple[Dic
     return entity_to_idx, idx_to_entity, relation_to_idx
 
 
+def load_or_create_mappings_cache(
+    train_file: str,
+    test_file: str,
+    cache_path: Optional[str] = None
+) -> Tuple[Dict, Dict, Dict, np.ndarray, np.ndarray]:
+    """Load mappings and numeric triples from cache, or create and cache them.
+
+    Args:
+        train_file: Path to training triples file
+        test_file: Path to test triples file
+        cache_path: Optional path to cache file for mappings
+
+    Returns:
+        Tuple of (entity_to_idx, idx_to_entity, relation_to_idx, train_numeric, test_numeric)
+    """
+    # Try to load from cache first
+    if cache_path and Path(cache_path).exists():
+        try:
+            logger.info(f"Loading mappings and numeric triples from cache: {cache_path}")
+            with open(cache_path, 'rb') as f:
+                cache_data = pickle.load(f)
+
+            entity_to_idx = cache_data['entity_to_idx']
+            idx_to_entity = cache_data['idx_to_entity']
+            relation_to_idx = cache_data['relation_to_idx']
+            train_numeric = cache_data['train_numeric']
+            test_numeric = cache_data['test_numeric']
+
+            logger.info(f"Loaded from cache: {len(entity_to_idx)} entities, "
+                       f"{len(relation_to_idx)} relations, "
+                       f"{len(train_numeric)} train triples, "
+                       f"{len(test_numeric)} test triples")
+
+            return entity_to_idx, idx_to_entity, relation_to_idx, train_numeric, test_numeric
+
+        except Exception as e:
+            logger.warning(f"Failed to load mappings cache: {e}")
+            logger.info("Rebuilding mappings...")
+
+    # Load triples from files
+    logger.info(f"Loading training triples from {train_file}")
+    train_triples = load_triples_from_file(train_file)
+
+    logger.info(f"Loading test triples from {test_file}")
+    test_triples = load_triples_from_file(test_file)
+
+    logger.info(f"Loaded {len(train_triples)} training, {len(test_triples)} test triples")
+
+    # Create mappings
+    logger.info("Creating entity/relation mappings...")
+    entity_to_idx, idx_to_entity, relation_to_idx = create_entity_mappings(
+        train_triples, test_triples
+    )
+    logger.info(f"Entities: {len(entity_to_idx)}, Relations: {len(relation_to_idx)}")
+
+    # Convert to numeric
+    logger.info("Converting triples to numeric format...")
+    train_numeric = np.array([
+        [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
+        for h, r, t in train_triples
+    ])
+
+    test_numeric = np.array([
+        [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
+        for h, r, t in test_triples
+    ])
+
+    # Save to cache if path provided
+    if cache_path:
+        try:
+            logger.info(f"Saving mappings to cache: {cache_path}")
+            cache_dir = Path(cache_path).parent
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            cache_data = {
+                'entity_to_idx': entity_to_idx,
+                'idx_to_entity': idx_to_entity,
+                'relation_to_idx': relation_to_idx,
+                'train_numeric': train_numeric,
+                'test_numeric': test_numeric
+            }
+
+            with open(cache_path, 'wb') as f:
+                pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+            logger.info(f"Mappings cache saved successfully")
+
+        except Exception as e:
+            logger.warning(f"Failed to save mappings cache: {e}")
+
+    return entity_to_idx, idx_to_entity, relation_to_idx, train_numeric, test_numeric
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Filter training triples using igraph (faster than NetworkX)',
@@ -411,35 +559,23 @@ def main():
                        help='Only keep edges on paths between drug and disease')
     parser.add_argument('--max-total-path-length', type=int, default=None,
                        help='Maximum total path length (drug_dist + disease_dist)')
+    parser.add_argument('--cache', type=str, default=None,
+                       help='Path to cache file for graph (speeds up repeated runs)')
+    parser.add_argument('--mappings-cache', type=str, default=None,
+                       help='Path to cache file for entity/relation mappings and numeric triples (speeds up repeated runs)')
 
     args = parser.parse_args()
 
-    # Load triples
-    logger.info(f"Loading training triples from {args.train}")
-    train_triples = load_triples_from_file(args.train)
+    # Determine mappings cache path
+    # If --mappings-cache is not provided but --cache is, derive it from --cache
+    mappings_cache = args.mappings_cache
+    if mappings_cache is None and args.cache:
+        cache_path = Path(args.cache)
+        mappings_cache = str(cache_path.parent / f"{cache_path.stem}_mappings.pkl")
 
-    logger.info(f"Loading test triples from {args.test}")
-    test_triples = load_triples_from_file(args.test)
-
-    logger.info(f"Loaded {len(train_triples)} training, {len(test_triples)} test triples")
-
-    # Create mappings
-    logger.info("Creating entity/relation mappings...")
-    entity_to_idx, idx_to_entity, relation_to_idx = create_entity_mappings(
-        train_triples, test_triples
-    )
-    logger.info(f"Entities: {len(entity_to_idx)}, Relations: {len(relation_to_idx)}")
-
-    # Convert to numeric
-    train_numeric = np.array([
-        [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
-        for h, r, t in train_triples
-    ])
-
-    test_numeric = np.array([
-        [entity_to_idx[h], relation_to_idx[r], entity_to_idx[t]]
-        for h, r, t in test_triples
-    ])
+    # Load or create mappings with caching
+    entity_to_idx, idx_to_entity, relation_to_idx, train_numeric, test_numeric = \
+        load_or_create_mappings_cache(args.train, args.test, mappings_cache)
 
     # Run igraph filter
     logger.info("\n" + "="*60)
@@ -447,7 +583,7 @@ def main():
     logger.info("="*60)
 
     start_time = time.time()
-    ig_filter = IGraphProximityFilter(train_numeric)
+    ig_filter = IGraphProximityFilter(train_numeric, cache_path=args.cache)
 
     ig_filtered, diagnostics = ig_filter.filter_for_test_triples(
         test_numeric,
