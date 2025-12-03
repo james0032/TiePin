@@ -108,62 +108,112 @@ class IGraphProximityFilter:
 
         return distances
 
-    def is_edge_on_drug_disease_path(
+    def find_all_paths_between_nodes(
         self,
-        src: int,
-        dst: int,
-        drug_distances: Dict[int, int],
-        disease_distances: Dict[int, int],
-        max_hops: int,
-        max_total_path_length: int = None
-    ) -> bool:
-        """Check if edge lies on a path between drug and disease nodes.
+        drug_nodes: List[int],
+        disease_nodes: List[int],
+        max_path_length: int
+    ) -> Tuple[List[List[int]], Dict]:
+        """
+        Find all simple paths between drug and disease nodes up to max_path_length.
 
         Args:
-            src: Source node of edge
-            dst: Destination node of edge
-            drug_distances: Dict of node -> hop distance from drugs
-            disease_distances: Dict of node -> hop distance from diseases
-            max_hops: Maximum hops allowed from each endpoint
-            max_total_path_length: Maximum total path length (optional)
+            drug_nodes: List of drug (source) node IDs
+            disease_nodes: List of disease (target) node IDs
+            max_path_length: Maximum path length to consider
 
         Returns:
-            True if edge is on a valid path, False otherwise
+            Tuple of (all_paths, path_statistics)
+            - all_paths: List of paths, where each path is a list of node IDs
+            - path_statistics: Dict with path count by length
         """
-        # Check if both endpoints are reachable
-        if src not in drug_distances or src not in disease_distances:
-            return False
-        if dst not in drug_distances or dst not in disease_distances:
-            return False
+        all_paths = []
+        path_lengths = defaultdict(int)
 
-        src_drug_dist = drug_distances[src]
-        src_disease_dist = disease_distances[src]
-        dst_drug_dist = drug_distances[dst]
-        dst_disease_dist = disease_distances[dst]
+        logger.info(f"Finding all simple paths between {len(drug_nodes)} drugs and "
+                   f"{len(disease_nodes)} diseases (cutoff={max_path_length})...")
 
-        # Check if within hop limits
-        if src_drug_dist > max_hops or src_disease_dist > max_hops:
-            return False
-        if dst_drug_dist > max_hops or dst_disease_dist > max_hops:
-            return False
+        total_pairs = len(drug_nodes) * len(disease_nodes)
+        pairs_with_paths = 0
 
-        # Path direction 1: drug -> src -> dst -> disease
-        path1_valid = (src_drug_dist <= dst_drug_dist and dst_disease_dist <= src_disease_dist)
+        for drug in drug_nodes:
+            if drug >= self.graph.vcount():
+                logger.warning(f"Drug node {drug} not in graph")
+                continue
 
-        # Check total path length for path1
-        if path1_valid and max_total_path_length is not None:
-            path1_length = src_drug_dist + dst_disease_dist
-            path1_valid = path1_length <= max_total_path_length
+            for disease in disease_nodes:
+                if disease >= self.graph.vcount():
+                    logger.warning(f"Disease node {disease} not in graph")
+                    continue
 
-        # Path direction 2: drug -> dst -> src -> disease
-        path2_valid = (dst_drug_dist <= src_drug_dist and src_disease_dist <= dst_disease_dist)
+                if drug == disease:
+                    continue
 
-        # Check total path length for path2
-        if path2_valid and max_total_path_length is not None:
-            path2_length = dst_drug_dist + src_disease_dist
-            path2_valid = path2_length <= max_total_path_length
+                # Find all simple paths up to cutoff length
+                # igraph's get_all_simple_paths returns paths as lists of vertex IDs
+                try:
+                    paths = self.graph.get_all_simple_paths(
+                        drug, to=disease, cutoff=max_path_length
+                    )
 
-        return path1_valid or path2_valid
+                    if paths:
+                        pairs_with_paths += 1
+                        for path in paths:
+                            all_paths.append(path)
+                            path_len = len(path) - 1  # Number of edges
+                            path_lengths[path_len] += 1
+
+                except Exception as e:
+                    logger.warning(f"Error finding paths from {drug} to {disease}: {e}")
+                    continue
+
+        # Create statistics
+        stats = {
+            'total_paths': len(all_paths),
+            'drug_disease_pairs': total_pairs,
+            'pairs_with_paths': pairs_with_paths,
+            'path_length_distribution': dict(sorted(path_lengths.items())),
+            'shortest_path_length': min(path_lengths.keys()) if path_lengths else None,
+            'longest_path_length': max(path_lengths.keys()) if path_lengths else None,
+            'avg_path_length': (sum(l * c for l, c in path_lengths.items()) /
+                               len(all_paths)) if all_paths else 0
+        }
+
+        logger.info(f"Found {len(all_paths)} paths connecting {pairs_with_paths}/{total_pairs} "
+                   f"drug-disease pairs")
+        if path_lengths:
+            logger.info(f"Path length distribution:")
+            for length in sorted(path_lengths.keys()):
+                count = path_lengths[length]
+                logger.info(f"  {length}-hop paths: {count}")
+
+        return all_paths, stats
+
+    def extract_edges_from_paths(
+        self,
+        paths: List[List[int]]
+    ) -> Set[Tuple[int, int]]:
+        """
+        Extract all unique edges from a list of paths.
+
+        Args:
+            paths: List of paths, where each path is a list of node IDs
+
+        Returns:
+            Set of edges (as tuples with smaller node ID first)
+        """
+        edges_on_paths = set()
+
+        for path in paths:
+            for i in range(len(path) - 1):
+                # Store edge with consistent ordering (smaller ID first)
+                src, dst = path[i], path[i + 1]
+                edge = (min(src, dst), max(src, dst))
+                edges_on_paths.add(edge)
+
+        logger.info(f"Extracted {len(edges_on_paths)} unique edges from {len(paths)} paths")
+
+        return edges_on_paths
 
     def filter_for_test_triples(
         self,
@@ -215,6 +265,22 @@ class IGraphProximityFilter:
         logger.info(f"Nodes reachable from diseases: {len(disease_reachable)}")
         logger.info(f"Intersection (reachable from both): {len(intersection_nodes)}")
 
+        # Path-based filtering: Find all paths and extract edges
+        edges_on_paths = None
+        path_stats = None
+        if path_filtering:
+            # Determine max path length
+            if max_total_path_length is not None:
+                max_path_len = max_total_path_length
+            else:
+                max_path_len = n_hops * 2  # Default: n_hops from drug + n_hops to disease
+
+            logger.info(f"Finding all paths between drugs and diseases (cutoff={max_path_len})...")
+            all_paths, path_stats = self.find_all_paths_between_nodes(
+                drug_nodes, disease_nodes, max_path_len
+            )
+            edges_on_paths = self.extract_edges_from_paths(all_paths)
+
         # Filter edges
         filtered_triple_indices = set()
         edges_kept = 0
@@ -249,13 +315,12 @@ class IGraphProximityFilter:
                 if src_degree >= min_degree or dst_degree >= min_degree:
                     should_keep = True
 
-            # Rule 3: Path filtering
+            # Rule 3: Path filtering - check if edge is on enumerated paths
             if should_keep and path_filtering:
-                if not self.is_edge_on_drug_disease_path(
-                    src, dst, drug_distances, disease_distances,
-                    n_hops, max_total_path_length
-                ):
-                    should_keep = False
+                if edges_on_paths is not None:
+                    edge_tuple = (min(src, dst), max(src, dst))
+                    if edge_tuple not in edges_on_paths:
+                        should_keep = False
 
             # Add triple indices if keeping this edge
             if should_keep:

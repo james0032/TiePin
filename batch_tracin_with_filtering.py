@@ -206,6 +206,70 @@ def filter_training_data_networkx(
         return False
 
 
+def filter_training_data_igraph(
+    train_file: str,
+    test_triple_file: str,
+    output_file: str,
+    n_hops: int = 2,
+    min_degree: int = 2,
+    preserve_test_edges: bool = True,
+    strict_hop_constraint: bool = False,
+    path_filtering: bool = False,
+    max_total_path_length: int = None
+) -> bool:
+    """Filter training data by proximity to test triple using igraph.
+
+    Args:
+        train_file: Path to training triples
+        test_triple_file: Path to single test triple file
+        output_file: Path to write filtered training data
+        n_hops: Number of hops for proximity filtering
+        min_degree: Minimum degree threshold
+        preserve_test_edges: Whether to preserve edges containing test entities
+        strict_hop_constraint: Whether to enforce strict n-hop constraint
+        path_filtering: Whether to only keep edges on paths between drug and disease
+        max_total_path_length: Maximum total path length when path_filtering is enabled
+
+    Returns:
+        True if successful, False otherwise
+    """
+    cmd = [
+        'python', 'filter_training_igraph.py',
+        '--train', train_file,
+        '--test', test_triple_file,
+        '--output', output_file,
+        '--n-hops', str(n_hops),
+        '--min-degree', str(min_degree)
+    ]
+
+    if preserve_test_edges:
+        cmd.append('--preserve-test-edges')
+
+    if path_filtering:
+        cmd.append('--path-filtering')
+
+    if max_total_path_length is not None:
+        cmd.extend(['--max-total-path-length', str(max_total_path_length)])
+
+    logger.info(f"Running igraph filter: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            # Let stdout/stderr pass through to console (don't capture)
+            # This allows real-time log viewing
+            stdout=None,  # Inherit stdout
+            stderr=None,  # Inherit stderr
+            text=True
+        )
+        logger.info("igraph filtering completed successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"igraph filtering failed: {e}")
+        return False
+
+
 def run_tracin_analysis(
     model_path: str,
     train_file: str,
@@ -360,6 +424,21 @@ Examples:
       --filter-method networkx \\
       --n-hops 2 \\
       --path-filtering \\
+      --max-total-path-length 4 \\
+      --device cuda
+
+  # Use igraph filtering (fast + transparent, C implementation)
+  python batch_tracin_with_filtering.py \\
+      --test-triples examples/20251017_top_test_triples.txt \\
+      --model-path model.pt \\
+      --train train.txt \\
+      --entity-to-id entity_to_id.tsv \\
+      --relation-to-id relation_to_id.tsv \\
+      --output-dir results/batch_tracin \\
+      --filter-method igraph \\
+      --n-hops 2 \\
+      --path-filtering \\
+      --max-total-path-length 4 \\
       --device cuda
 
   # Resume from checkpoint (skip already processed triples)
@@ -410,9 +489,11 @@ Examples:
 
     # Filtering parameters
     parser.add_argument('--filter-method', type=str, default='pyg',
-                        choices=['pyg', 'networkx'],
-                        help='Filtering implementation to use: pyg (PyTorch Geometric, faster) or '
-                             'networkx (more transparent, easier to debug) (default: pyg)')
+                        choices=['pyg', 'networkx', 'igraph'],
+                        help='Filtering implementation to use: '
+                             'pyg (PyTorch Geometric, fastest), '
+                             'networkx (transparent, easier to debug), or '
+                             'igraph (fast + transparent, C implementation) (default: pyg)')
     parser.add_argument('--n-hops', type=int, default=2,
                         help='Number of hops for proximity filtering (default: 2)')
     parser.add_argument('--min-degree', type=int, default=2,
@@ -575,6 +656,18 @@ Examples:
             # Choose filtering method
             if args.filter_method == 'networkx':
                 filter_success = filter_training_data_networkx(
+                    train_file=args.train,
+                    test_triple_file=str(temp_triple_file),
+                    output_file=str(filtered_train_file),
+                    n_hops=args.n_hops,
+                    min_degree=args.min_degree,
+                    preserve_test_edges=not args.no_preserve_test_edges,
+                    strict_hop_constraint=args.strict_hop_constraint,
+                    path_filtering=args.path_filtering,
+                    max_total_path_length=args.max_total_path_length
+                )
+            elif args.filter_method == 'igraph':
+                filter_success = filter_training_data_igraph(
                     train_file=args.train,
                     test_triple_file=str(temp_triple_file),
                     output_file=str(filtered_train_file),
