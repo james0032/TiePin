@@ -568,17 +568,17 @@ def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_
     total_pairs = len(pair_to_intermediates)
     pairs_with_intermediates = sum(1 for nodes in pair_to_intermediates.values() if nodes)
 
-    print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB}")
+    print(f"✓ Saved to {output_path} ({file_size_kb:.2f} KB)")
     print(f"  Total unique drug-disease pairs: {total_pairs}")
     print(f"  Pairs with intermediate nodes: {pairs_with_intermediates}")
 
-def save_path_id_results(results, output_txt='drugmechdb_path_id_results.txt', output_dir='.'):
-    """Save results grouped by drugmechdb_path_id to a .txt file.
+def save_path_id_results(results, output_csv='drugmechdb_path_id_results.csv', output_dir='.'):
+    """Save results grouped by drugmechdb_path_id to a CSV file.
 
     Format: Drug,Disease,Intermediate_Nodes,drugmechdb_path_id
     Uses proper CSV formatting with quoting for list values.
     """
-    output_path = os.path.join(output_dir, output_txt)
+    output_path = os.path.join(output_dir, output_csv)
     print(f"\n{'='*70}")
     print(f"Saving path_id-based results to {output_path}...")
 
