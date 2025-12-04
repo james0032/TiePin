@@ -86,6 +86,92 @@ def keep_CGGD(edge, typemap):
                 ("biolink:Gene", "biolink:DiseaseOrPhenotypicFeature")]
     return check_accepted(edge, typemap, accepted)
 
+def clean_baseline_kg(edge, typemap):
+    # return True if you want to filter this edge out
+    # We want to keep edges between chemicals and genes, between genes and disease, and between chemicals and diseases
+    # Unfortunately this means that we need a type map... Dangit
+
+    # Initialize counters if not already present
+    if not hasattr(clean_baseline_kg, 'predicate_counter'):
+        clean_baseline_kg.predicate_counter = {}
+        clean_baseline_kg.source_counter = {}
+        clean_baseline_kg.filtered_by_predicate = 0
+        clean_baseline_kg.filtered_by_source = 0
+        clean_baseline_kg.kept_edges = 0
+
+    filtered_predicates = ["biolink:in_taxon", "biolink:related_to", "biolink:expressed_in",
+                          "biolink:located_in", "biolink:temporally_related_to",
+                          "biolink:affects_response_to", "biolink:decreases_response_to",
+                          "biolink:increases_response_to"]
+
+    filtered_sources = ["infores:text-mining-provider-targeted", "infores:zfin", "infores:tiga",
+                       "infores:flybase", "infores:sgd", "infores:rgd", "infores:mgi"]
+
+    predicate = edge.get("predicate", "")
+    source = edge.get("primary_knowledge_source", "")
+
+    # Track predicate
+    if predicate not in clean_baseline_kg.predicate_counter:
+        clean_baseline_kg.predicate_counter[predicate] = 0
+    clean_baseline_kg.predicate_counter[predicate] += 1
+
+    # Track source
+    if source not in clean_baseline_kg.source_counter:
+        clean_baseline_kg.source_counter[source] = 0
+    clean_baseline_kg.source_counter[source] += 1
+
+    if predicate in filtered_predicates:
+        clean_baseline_kg.filtered_by_predicate += 1
+        return True
+    elif source in filtered_sources:
+        clean_baseline_kg.filtered_by_source += 1
+        return True
+
+    clean_baseline_kg.kept_edges += 1
+    return False
+
+def log_clean_baseline_kg_stats():
+    """Log statistics about what clean_baseline_kg has processed."""
+    if not hasattr(clean_baseline_kg, 'predicate_counter'):
+        logger.info("No statistics available for clean_baseline_kg")
+        return
+
+    logger.info("=" * 80)
+    logger.info("CLEAN_BASELINE_KG FILTERING STATISTICS")
+    logger.info("=" * 80)
+
+    total_processed = sum(clean_baseline_kg.predicate_counter.values())
+    logger.info(f"Total edges processed: {total_processed:,}")
+    logger.info(f"  Filtered by predicate: {clean_baseline_kg.filtered_by_predicate:,} ({clean_baseline_kg.filtered_by_predicate/total_processed*100:.2f}%)")
+    logger.info(f"  Filtered by source: {clean_baseline_kg.filtered_by_source:,} ({clean_baseline_kg.filtered_by_source/total_processed*100:.2f}%)")
+    logger.info(f"  Kept edges: {clean_baseline_kg.kept_edges:,} ({clean_baseline_kg.kept_edges/total_processed*100:.2f}%)")
+
+    logger.info("")
+    logger.info("PREDICATE FREQUENCY (Top 20):")
+    logger.info(f"  {'Predicate':<60} {'Count':>10} {'%':>8}")
+    logger.info(f"  {'-'*60} {'-'*10} {'-'*8}")
+    sorted_predicates = sorted(clean_baseline_kg.predicate_counter.items(), key=lambda x: x[1], reverse=True)
+    for pred, count in sorted_predicates[:20]:
+        percentage = count / total_processed * 100
+        logger.info(f"  {pred:<60} {count:>10,} {percentage:>7.2f}%")
+
+    if len(sorted_predicates) > 20:
+        logger.info(f"  ... and {len(sorted_predicates) - 20} more predicates")
+
+    logger.info("")
+    logger.info("PRIMARY KNOWLEDGE SOURCE FREQUENCY (Top 20):")
+    logger.info(f"  {'Source':<60} {'Count':>10} {'%':>8}")
+    logger.info(f"  {'-'*60} {'-'*10} {'-'*8}")
+    sorted_sources = sorted(clean_baseline_kg.source_counter.items(), key=lambda x: x[1], reverse=True)
+    for source, count in sorted_sources[:20]:
+        percentage = count / total_processed * 100
+        logger.info(f"  {source:<60} {count:>10,} {percentage:>7.2f}%")
+
+    if len(sorted_sources) > 20:
+        logger.info(f"  ... and {len(sorted_sources) - 20} more sources")
+
+    logger.info("=" * 80)
+
 def keep_CGGD_alltreat(edge, typemap):
     # return True if you want to filter this edge out
     # We want to keep edges between chemicals and genes, between genes and disease, and between chemicals and diseases
@@ -181,6 +267,9 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
     elif style == "CCGGDD_alltreat":
         remove_edge = keep_CCGGDD_alltreat
         logger.info("Using 'CCGGDD_alltreat' style: keeping CCGGDD edges plus all 'treats' relationships")   
+    elif style == "clean_baseline":
+        remove_edge = clean_baseline_kg
+        logger.info("Using 'clean_baseline' style: Remove almost irrelevant predicates and primary knowledge sources")   
         
     else:
         logger.error(f"Unknown style: {style}")
@@ -232,6 +321,10 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
     logger.info(f"  Edges filtered: {filtered_edges}")
     logger.info(f"  Filter rate: {(filtered_edges/total_edges*100):.2f}%")
 
+    # Log detailed statistics if using clean_baseline style
+    if style == "clean_baseline":
+        log_clean_baseline_kg_stats()
+
     dump_edge_map(edge_map, outdir)
     logger.info(f"Subgraph creation complete! Output written to {output_file}")
 
@@ -270,7 +363,7 @@ Examples:
         '--style',
         type=str,
         default='CGGD_alltreat',
-        choices=['original', 'CD', 'CCGGDD', 'CGGD', 'rCD', 'keepall', 'CGGD_alltreat', 'CCGGDD_alltreat'],
+        choices=['original', 'CD', 'CCGGDD', 'CGGD', 'rCD', 'keepall', 'CGGD_alltreat', 'CCGGDD_alltreat', 'clean_baseline'],
         help='Filtering style to apply (default: CGGD_alltreat)'
     )
 
