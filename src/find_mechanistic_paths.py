@@ -572,7 +572,7 @@ def save_results_txt_deduplicated(results, output_txt='dedup_treats_mechanistic_
     print(f"  Total unique drug-disease pairs: {total_pairs}")
     print(f"  Pairs with intermediate nodes: {pairs_with_intermediates}")
 
-def save_path_id_results(results, output_csv='drugmechdb_path_id_results.csv', output_dir='.'):
+def save_path_id_results(results, output_csv='drugmechdb_path_id_results.txt', output_dir='.'):
     """Save results grouped by drugmechdb_path_id to a CSV file.
 
     Format: Drug,Disease,Intermediate_Nodes,drugmechdb_path_id
