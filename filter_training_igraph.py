@@ -605,6 +605,8 @@ def main():
                        help='Path to cache file for graph (speeds up repeated runs)')
     parser.add_argument('--mappings-cache', type=str, default=None,
                        help='Path to cache file for entity/relation mappings and numeric triples (speeds up repeated runs)')
+    parser.add_argument('--save-edges-only', action='store_true',
+                       help='Save only unique edges (one triple per edge) instead of all triples that share edges')
 
     args = parser.parse_args()
 
@@ -647,14 +649,41 @@ def main():
 
     idx_to_relation = {v: k for k, v in relation_to_idx.items()}
 
-    with open(args.output, 'w') as f:
-        for h_idx, r_idx, t_idx in ig_filtered:
-            h = idx_to_entity[h_idx]
-            r = idx_to_relation[r_idx]
-            t = idx_to_entity[t_idx]
-            f.write(f"{h}\t{r}\t{t}\n")
+    if args.save_edges_only:
+        # Save only unique edges (one triple per edge)
+        logger.info("Saving unique edges only (one triple per edge)...")
 
-    logger.info(f"Saved {len(ig_filtered)} triples")
+        # Track unique edges and pick first triple for each
+        edges_seen = set()
+        triples_to_save = []
+
+        for h_idx, r_idx, t_idx in ig_filtered:
+            # Create normalized edge tuple (undirected)
+            edge = (min(h_idx, t_idx), max(h_idx, t_idx))
+
+            if edge not in edges_seen:
+                edges_seen.add(edge)
+                triples_to_save.append((h_idx, r_idx, t_idx))
+
+        with open(args.output, 'w') as f:
+            for h_idx, r_idx, t_idx in triples_to_save:
+                h = idx_to_entity[h_idx]
+                r = idx_to_relation[r_idx]
+                t = idx_to_entity[t_idx]
+                f.write(f"{h}\t{r}\t{t}\n")
+
+        logger.info(f"Saved {len(triples_to_save)} unique edges (reduced from {len(ig_filtered)} triples)")
+        logger.info(f"Average triples per edge: {len(ig_filtered) / len(triples_to_save):.2f}")
+    else:
+        # Save all triples (default behavior)
+        with open(args.output, 'w') as f:
+            for h_idx, r_idx, t_idx in ig_filtered:
+                h = idx_to_entity[h_idx]
+                r = idx_to_relation[r_idx]
+                t = idx_to_entity[t_idx]
+                f.write(f"{h}\t{r}\t{t}\n")
+
+        logger.info(f"Saved {len(ig_filtered)} triples")
 
 
 if __name__ == '__main__':

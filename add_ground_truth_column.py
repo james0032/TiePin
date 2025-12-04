@@ -11,7 +11,6 @@ Also adds path-related columns when mechanistic paths are provided:
 """
 
 import argparse
-import ast
 import csv
 import json
 import logging
@@ -69,7 +68,8 @@ def load_mechanistic_paths(csv_file: str) -> Dict[Tuple[str, str], List[str]]:
     """Load mechanistic paths from CSV file.
 
     Args:
-        csv_file: Path to CSV file with Drug, Disease, [Intermediate Nodes] columns
+        csv_file: Path to CSV file with Drug, Disease, Intermediate_Nodes columns
+        Format example: CHEBI:10023,HP:0020103,"[GO:0006696, GO:0030445]",DB00582_MESH_D055744_1
 
     Returns:
         Dictionary mapping (drug, disease) tuples to lists of intermediate nodes
@@ -83,19 +83,14 @@ def load_mechanistic_paths(csv_file: str) -> Dict[Tuple[str, str], List[str]]:
 
         # Log available columns for debugging
         fieldnames = reader.fieldnames
-        logger.debug(f"CSV columns found: {fieldnames}")
+        logger.info(f"CSV columns found: {fieldnames}")
 
         for row_num, row in enumerate(reader, 1):
             drug = row.get('Drug', '').strip()
             disease = row.get('Disease', '').strip()
 
-            # Try multiple possible column names for intermediate nodes
-            intermediate_nodes_str = (
-                row.get('[Intermediate Nodes]', '') or
-                row.get('Intermediate_Nodes', '') or
-                row.get('Intermediate Nodes', '') or
-                row.get('[Intermediate_Nodes]', '')
-            ).strip()
+            # Get intermediate nodes column
+            intermediate_nodes_str = row.get('Intermediate_Nodes', '').strip()
 
             if not drug or not disease:
                 logger.warning(f"Row {row_num}: Missing Drug or Disease")
@@ -107,34 +102,39 @@ def load_mechanistic_paths(csv_file: str) -> Dict[Tuple[str, str], List[str]]:
                 if not intermediate_nodes_str or intermediate_nodes_str == '[]':
                     intermediate_nodes = []
                 else:
-                    # Remove brackets and split by comma
-                    # Format is: "[CHEBI:17154, MONDO:0019975]"
-                    if intermediate_nodes_str.startswith('['):
-                        # Check if closing bracket is missing (data quality issue)
-                        if not intermediate_nodes_str.endswith(']'):
-                            logger.warning(f"Row {row_num}: Malformed intermediate nodes (missing closing bracket): '{intermediate_nodes_str}' - treating as empty")
-                            intermediate_nodes = []
+                    # Format is: "[GO:0006696, GO:0030445, HGNC.FAMILY:862, NCBITaxon:5052]"
+                    # Remove leading/trailing brackets and whitespace
+                    if intermediate_nodes_str.startswith('[') and intermediate_nodes_str.endswith(']'):
+                        # Remove brackets
+                        nodes_str = intermediate_nodes_str[1:-1].strip()
+                        if nodes_str:
+                            # Split by comma and strip whitespace from each node
+                            intermediate_nodes = [node.strip() for node in nodes_str.split(',') if node.strip()]
                         else:
-                            # Remove brackets
-                            nodes_str = intermediate_nodes_str[1:-1].strip()
-                            if nodes_str:
-                                # Split by comma and strip whitespace
-                                intermediate_nodes = [node.strip() for node in nodes_str.split(',')]
-                            else:
-                                intermediate_nodes = []
-                    else:
-                        # Try ast.literal_eval as fallback for properly quoted strings
-                        intermediate_nodes = ast.literal_eval(intermediate_nodes_str)
-                        if not isinstance(intermediate_nodes, list):
                             intermediate_nodes = []
+                    else:
+                        # If no brackets, try splitting by comma directly
+                        logger.warning(f"Row {row_num}: Intermediate_Nodes doesn't have brackets: '{intermediate_nodes_str}'")
+                        intermediate_nodes = [node.strip() for node in intermediate_nodes_str.split(',') if node.strip()]
 
                 paths[(drug, disease)] = intermediate_nodes
 
-            except (ValueError, SyntaxError) as e:
+                # Log first few paths for verification
+                if row_num <= 3:
+                    logger.info(f"  Example path {row_num}: {drug} -> {disease} via {intermediate_nodes}")
+
+            except Exception as e:
                 logger.warning(f"Row {row_num}: Failed to parse intermediate nodes '{intermediate_nodes_str}': {e} - treating as empty")
                 paths[(drug, disease)] = []
 
     logger.info(f"Loaded {len(paths)} mechanistic paths")
+
+    # Log statistics
+    non_empty_paths = sum(1 for nodes in paths.values() if nodes)
+    if non_empty_paths > 0:
+        avg_length = sum(len(nodes) for nodes in paths.values()) / non_empty_paths
+        logger.info(f"  {non_empty_paths} paths have intermediate nodes (avg length: {avg_length:.1f})")
+
     return paths
 
 
