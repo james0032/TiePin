@@ -17,11 +17,18 @@ click>=8.0.0
 jsonlines
 
 # Visualization
-seaborn
+matplotlib>=3.3.0
+seaborn>=0.11.0
 
 # Graph analysis
 networkx>=2.6.0
 torch-geometric
+python-igraph>=0.10.0
+
+# Jupyter notebook support
+jupyter>=1.0.0
+jupyterlab>=3.0.0
+ipython>=7.0.0
 
 # Workflow management
 snakemake==7.32.4

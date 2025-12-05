@@ -106,7 +106,7 @@ def clean_baseline_kg(edge, typemap):
 
     filtered_sources = ["infores:text-mining-provider-targeted", "infores:zfin", "infores:tiga",
                        "infores:flybase", "infores:sgd", "infores:rgd", "infores:mgi"]
-
+    # futhre filters: non-human from reactome. text mined kp, affinity <7 from binidngdb. NCIT nodes using subclass_of predicate. Take out degree 1 or degree 2 nodes.  
     predicate = edge.get("predicate", "")
     source = edge.get("primary_knowledge_source", "")
 

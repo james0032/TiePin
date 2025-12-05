@@ -66,3 +66,6 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Do not update ipynb
+*.ipynb
