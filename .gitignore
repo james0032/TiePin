@@ -69,3 +69,7 @@ htmlcov/
 
 # Do not update ipynb
 *.ipynb
+
+#png in analysis
+
+analysis/**/*.png

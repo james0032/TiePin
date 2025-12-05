@@ -7,6 +7,8 @@ from pathlib import Path
 
 import jsonlines
 import json
+import igraph as ig
+from collections import defaultdict
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -86,7 +88,50 @@ def keep_CGGD(edge, typemap):
                 ("biolink:Gene", "biolink:DiseaseOrPhenotypicFeature")]
     return check_accepted(edge, typemap, accepted)
 
-def clean_baseline_kg(edge, typemap):
+def compute_low_degree_nodes(edges_file, min_degree=2):
+    """
+    Build a graph from edges.jsonl and identify nodes with degree < min_degree.
+
+    Parameters
+    ----------
+    edges_file : str
+        Path to edges.jsonl file
+    min_degree : int
+        Minimum degree threshold (nodes with degree < min_degree will be returned)
+
+    Returns
+    -------
+    set
+        Set of node IDs with degree < min_degree
+    """
+    logger.info(f"Computing low-degree nodes (degree < {min_degree})...")
+
+    # Count degrees using a dictionary
+    degree_count = defaultdict(int)
+    edge_count = 0
+
+    with jsonlines.open(edges_file) as reader:
+        for edge in reader:
+            subject = edge.get("subject", "")
+            obj = edge.get("object", "")
+
+            degree_count[subject] += 1
+            degree_count[obj] += 1
+            edge_count += 1
+
+            if edge_count % 100000 == 0:
+                logger.debug(f"Processed {edge_count} edges for degree calculation...")
+
+    # Find nodes with degree < min_degree
+    low_degree_nodes = {node for node, degree in degree_count.items() if degree < min_degree}
+
+    logger.info(f"Found {len(low_degree_nodes):,} nodes with degree < {min_degree} out of {len(degree_count):,} total nodes")
+    logger.info(f"Low-degree node percentage: {len(low_degree_nodes)/len(degree_count)*100:.2f}%")
+
+    return low_degree_nodes
+
+
+def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
     # return True if you want to filter this edge out
     # We want to keep edges between chemicals and genes, between genes and disease, and between chemicals and diseases
     # Unfortunately this means that we need a type map... Dangit
@@ -97,6 +142,10 @@ def clean_baseline_kg(edge, typemap):
         clean_baseline_kg.source_counter = {}
         clean_baseline_kg.filtered_by_predicate = 0
         clean_baseline_kg.filtered_by_source = 0
+        clean_baseline_kg.filtered_by_reactome = 0
+        clean_baseline_kg.filtered_by_bindingdb = 0
+        clean_baseline_kg.filtered_by_ncit_subclass = 0
+        clean_baseline_kg.filtered_by_low_degree = 0
         clean_baseline_kg.kept_edges = 0
 
     filtered_predicates = ["biolink:in_taxon", "biolink:related_to", "biolink:expressed_in",
@@ -106,9 +155,11 @@ def clean_baseline_kg(edge, typemap):
 
     filtered_sources = ["infores:text-mining-provider-targeted", "infores:zfin", "infores:tiga",
                        "infores:flybase", "infores:sgd", "infores:rgd", "infores:mgi"]
-    # futhre filters: non-human from reactome. text mined kp, affinity <7 from binidngdb. NCIT nodes using subclass_of predicate. Take out degree 1 or degree 2 nodes.  
+    # additional filters: non-human from reactome. text mined kp, affinity <7 from binidngdb. NCIT nodes using subclass_of predicate. Take out degree 1 or degree 2 nodes.
     predicate = edge.get("predicate", "")
     source = edge.get("primary_knowledge_source", "")
+    subject = edge.get("subject", "")
+    obj = edge.get("object", "")
 
     # Track predicate
     if predicate not in clean_baseline_kg.predicate_counter:
@@ -120,6 +171,61 @@ def clean_baseline_kg(edge, typemap):
         clean_baseline_kg.source_counter[source] = 0
     clean_baseline_kg.source_counter[source] += 1
 
+    # Filter 1: Non-human Reactome edges
+    # If subject or object has prefix REACT and middle part is not "HSA", remove edge
+    if subject.startswith("REACT:") or obj.startswith("REACT:"):
+        # Extract the middle part (species code) from REACT IDs
+        # Format is typically REACT:R-XXX-... where XXX is the species code
+        subject_is_non_human = False
+        object_is_non_human = False
+
+        if subject.startswith("REACT:"):
+            # Split by '-' and check if the species code (second part) is not "HSA"
+            parts = subject.split("-")
+            if len(parts) >= 2 and parts[1] != "HSA":
+                subject_is_non_human = True
+
+        if obj.startswith("REACT:"):
+            parts = obj.split("-")
+            if len(parts) >= 2 and parts[1] != "HSA":
+                object_is_non_human = True
+
+        if subject_is_non_human or object_is_non_human:
+            clean_baseline_kg.filtered_by_reactome += 1
+            return True
+
+    # Filter 2: BindingDB affinity filter
+    # If source is bindingdb, only keep if affinity is not None and > 7
+    if source == "infores:bindingdb":
+        # Check for affinity attribute in edge attributes
+        attributes = edge.get("attributes", [])
+        affinity_value = None
+
+        for attr in attributes:
+            if attr.get("attribute_type_id") == "affinity":
+                affinity_value = attr.get("value")
+                break
+
+        # If affinity is None or <= 7, filter out the edge
+        if affinity_value is None or affinity_value <= 7:
+            clean_baseline_kg.filtered_by_bindingdb += 1
+            return True
+
+    # Filter 3: NCIT subclass_of edges
+    # If predicate is biolink:subclass_of and both subject and object have prefix "NCIT", remove
+    if predicate == "biolink:subclass_of":
+        if subject.startswith("NCIT:") and obj.startswith("NCIT:"):
+            clean_baseline_kg.filtered_by_ncit_subclass += 1
+            return True
+
+    # Filter 4: Low-degree nodes
+    # If subject or object is in low_degree_nodes, remove edge
+    if low_degree_nodes is not None:
+        if subject in low_degree_nodes or obj in low_degree_nodes:
+            clean_baseline_kg.filtered_by_low_degree += 1
+            return True
+
+    # Original filters
     if predicate in filtered_predicates:
         clean_baseline_kg.filtered_by_predicate += 1
         return True
@@ -144,6 +250,10 @@ def log_clean_baseline_kg_stats():
     logger.info(f"Total edges processed: {total_processed:,}")
     logger.info(f"  Filtered by predicate: {clean_baseline_kg.filtered_by_predicate:,} ({clean_baseline_kg.filtered_by_predicate/total_processed*100:.2f}%)")
     logger.info(f"  Filtered by source: {clean_baseline_kg.filtered_by_source:,} ({clean_baseline_kg.filtered_by_source/total_processed*100:.2f}%)")
+    logger.info(f"  Filtered by Reactome (non-human): {clean_baseline_kg.filtered_by_reactome:,} ({clean_baseline_kg.filtered_by_reactome/total_processed*100:.2f}%)")
+    logger.info(f"  Filtered by BindingDB (affinity): {clean_baseline_kg.filtered_by_bindingdb:,} ({clean_baseline_kg.filtered_by_bindingdb/total_processed*100:.2f}%)")
+    logger.info(f"  Filtered by NCIT subclass_of: {clean_baseline_kg.filtered_by_ncit_subclass:,} ({clean_baseline_kg.filtered_by_ncit_subclass/total_processed*100:.2f}%)")
+    logger.info(f"  Filtered by low degree: {clean_baseline_kg.filtered_by_low_degree:,} ({clean_baseline_kg.filtered_by_low_degree/total_processed*100:.2f}%)")
     logger.info(f"  Kept edges: {clean_baseline_kg.kept_edges:,} ({clean_baseline_kg.kept_edges/total_processed*100:.2f}%)")
 
     logger.info("")
@@ -217,7 +327,7 @@ def dump_edge_map(edge_map, outdir):
         json.dump(edge_map, writer, indent=2)
     logger.info(f"Edge map written with {len(edge_map)} unique predicates")
 
-def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/edges.jsonl", style="original", outdir=None):
+def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/edges.jsonl", style="original", outdir=None, min_degree=2):
     # Determine output directory
     if outdir is None:
         outdir = f"robokop/{style}"
@@ -231,6 +341,8 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
     logger.info(f"  Style: {style}")
     logger.info(f"  Output directory: {outdir}")
     logger.info(f"  Output file: {output_file}")
+    if style == "clean_baseline":
+        logger.info(f"  Min degree threshold: {min_degree}")
     logger.info("=" * 80)
 
     # Select filtering strategy based on style
@@ -294,6 +406,11 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
 
     logger.info(f"Type map created with {len(type_map)} nodes")
 
+    # Compute low-degree nodes if using clean_baseline style
+    low_degree_nodes = None
+    if style == "clean_baseline":
+        low_degree_nodes = compute_low_degree_nodes(edges_file, min_degree=min_degree)
+
     # Process edges
     logger.info(f"Processing edges from {edges_file}...")
     edge_map = {}
@@ -308,9 +425,15 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
                 if total_edges % 100000 == 0:
                     logger.info(f"Processed {total_edges} edges, kept {kept_edges}, filtered {filtered_edges}")
 
-                if remove_edge(edge, type_map):
-                    filtered_edges += 1
-                    continue
+                # Pass low_degree_nodes to clean_baseline_kg if applicable
+                if style == "clean_baseline":
+                    if remove_edge(edge, type_map, low_degree_nodes):
+                        filtered_edges += 1
+                        continue
+                else:
+                    if remove_edge(edge, type_map):
+                        filtered_edges += 1
+                        continue
 
                 writer.write(f"{edge['subject']}\t{pred_trans(edge,edge_map)}\t{edge['object']}\n")
                 kept_edges += 1
@@ -396,6 +519,13 @@ Examples:
         help='Logging level (default: INFO)'
     )
 
+    parser.add_argument(
+        '--min-degree',
+        type=int,
+        default=2,
+        help='Minimum degree threshold for clean_baseline style (nodes with degree < min-degree will be filtered out, default: 2)'
+    )
+
     return parser.parse_args()
 
 
@@ -425,7 +555,8 @@ def main():
             node_file=args.node_file,
             edges_file=args.edges_file,
             style=args.style,
-            outdir=args.outdir
+            outdir=args.outdir,
+            min_degree=args.min_degree
         )
 
         logger.info("All processing complete!")
