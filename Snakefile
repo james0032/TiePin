@@ -31,17 +31,26 @@ rule all:
         # Subgraph files
         f"{BASE_DIR}/rotorobo.txt",
         f"{BASE_DIR}/edge_map.json",
-        # Mechanistic paths output
+        # Mechanistic paths output (from extract_mechanistic_paths)
         f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_path_id_results.txt",
-        # DrugMechDB test set
+        f"{BASE_DIR}/results/mechanistic_paths/treats.txt",
+        # Filtered treats edges (from filter_treats_with_drugmechdb)
+        f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_treats_filtered.txt",
+        f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_path_id_results_annotated.csv",
+        f"{BASE_DIR}/results/mechanistic_paths/treats_annotated.txt",
+        # DrugMechDB test set (from extract_drugmechdb_test)
         f"{BASE_DIR}/test.txt",
         f"{BASE_DIR}/train_candidates.txt",
-        # Train/valid split
+        f"{BASE_DIR}/test_statistics.json",
+        # Train/valid split (from split_data)
         f"{BASE_DIR}/train.txt",
         f"{BASE_DIR}/valid.txt",
-        # Dictionary files
+        f"{BASE_DIR}/split_statistics.json",
+        # Dictionary files (from prepare_dictionaries)
         f"{BASE_DIR}/processed/node_dict.txt",
+        f"{BASE_DIR}/processed/node_name_dict.txt",
         f"{BASE_DIR}/processed/rel_dict.txt",
+        f"{BASE_DIR}/processed/graph_stats.txt",
         # Trained model (PyKEEN outputs)
         f"{BASE_DIR}/models/conve/config.json",
         # Note: test_results.json from train.py is optional (only if skip_evaluation=false)
