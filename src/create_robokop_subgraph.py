@@ -88,7 +88,49 @@ def keep_CGGD(edge, typemap):
                 ("biolink:Gene", "biolink:DiseaseOrPhenotypicFeature")]
     return check_accepted(edge, typemap, accepted)
 
-def compute_low_degree_nodes(edges_file, min_degree=2):
+def collect_treats_edge_nodes(edges_file):
+    """
+    Collect all node IDs that appear in biolink:treats edges.
+    These nodes will be protected from low-degree filtering.
+
+    Parameters
+    ----------
+    edges_file : str
+        Path to edges.jsonl file
+
+    Returns
+    -------
+    set
+        Set of node IDs that appear in biolink:treats edges
+    """
+    logger.info("Collecting nodes from biolink:treats edges...")
+
+    treats_nodes = set()
+    treats_edge_count = 0
+    edge_count = 0
+
+    with jsonlines.open(edges_file) as reader:
+        for edge in reader:
+            edge_count += 1
+            predicate = edge.get("predicate", "")
+
+            if predicate == "biolink:treats":
+                subject = edge.get("subject", "")
+                obj = edge.get("object", "")
+                treats_nodes.add(subject)
+                treats_nodes.add(obj)
+                treats_edge_count += 1
+
+            if edge_count % 100000 == 0:
+                logger.debug(f"Processed {edge_count} edges for treats node collection...")
+
+    logger.info(f"Found {treats_edge_count:,} biolink:treats edges")
+    logger.info(f"Collected {len(treats_nodes):,} unique nodes from treats edges")
+
+    return treats_nodes
+
+
+def compute_low_degree_nodes(edges_file, min_degree=2, protected_nodes=None):
     """
     Build a graph from edges.jsonl and identify nodes with degree < min_degree.
 
@@ -98,13 +140,18 @@ def compute_low_degree_nodes(edges_file, min_degree=2):
         Path to edges.jsonl file
     min_degree : int
         Minimum degree threshold (nodes with degree < min_degree will be returned)
+    protected_nodes : set, optional
+        Set of node IDs that should not be considered low-degree (e.g., from treats edges)
 
     Returns
     -------
     set
-        Set of node IDs with degree < min_degree
+        Set of node IDs with degree < min_degree (excluding protected nodes)
     """
     logger.info(f"Computing low-degree nodes (degree < {min_degree})...")
+
+    if protected_nodes is None:
+        protected_nodes = set()
 
     # Count degrees using a dictionary
     degree_count = defaultdict(int)
@@ -122,10 +169,14 @@ def compute_low_degree_nodes(edges_file, min_degree=2):
             if edge_count % 100000 == 0:
                 logger.debug(f"Processed {edge_count} edges for degree calculation...")
 
-    # Find nodes with degree < min_degree
-    low_degree_nodes = {node for node, degree in degree_count.items() if degree < min_degree}
+    # Find nodes with degree < min_degree, excluding protected nodes
+    low_degree_nodes = {
+        node for node, degree in degree_count.items()
+        if degree < min_degree and node not in protected_nodes
+    }
 
     logger.info(f"Found {len(low_degree_nodes):,} nodes with degree < {min_degree} out of {len(degree_count):,} total nodes")
+    logger.info(f"Protected {len(protected_nodes):,} nodes from low-degree filtering")
     logger.info(f"Low-degree node percentage: {len(low_degree_nodes)/len(degree_count)*100:.2f}%")
 
     return low_degree_nodes
@@ -147,6 +198,16 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
         clean_baseline_kg.filtered_by_ncit_subclass = 0
         clean_baseline_kg.filtered_by_low_degree = 0
         clean_baseline_kg.kept_edges = 0
+        clean_baseline_kg.kept_treats_edges = 0
+
+    predicate = edge.get("predicate", "")
+
+    # TOP FILTER: Always keep biolink:treats edges
+    # These edges and their nodes are protected from all filtering
+    if predicate == "biolink:treats":
+        clean_baseline_kg.kept_treats_edges += 1
+        clean_baseline_kg.kept_edges += 1
+        return False
 
     filtered_predicates = ["biolink:in_taxon", "biolink:related_to", "biolink:expressed_in",
                           "biolink:located_in", "biolink:temporally_related_to",
@@ -155,7 +216,6 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
     filtered_sources = ["infores:text-mining-provider-targeted", "infores:zfin", "infores:tiga",
                        "infores:flybase", "infores:sgd", "infores:rgd", "infores:mgi"]
     # additional filters: non-human from reactome. text mined kp, affinity <7 from binidngdb. NCIT nodes using subclass_of predicate. Take out degree 1 or degree 2 nodes.
-    predicate = edge.get("predicate", "")
     source = edge.get("primary_knowledge_source", "")
     subject = edge.get("subject", "")
     obj = edge.get("object", "")
@@ -247,6 +307,7 @@ def log_clean_baseline_kg_stats():
 
     total_processed = sum(clean_baseline_kg.predicate_counter.values())
     logger.info(f"Total edges processed: {total_processed:,}")
+    logger.info(f"  Kept biolink:treats edges (protected): {clean_baseline_kg.kept_treats_edges:,} ({clean_baseline_kg.kept_treats_edges/total_processed*100:.2f}%)")
     logger.info(f"  Filtered by predicate: {clean_baseline_kg.filtered_by_predicate:,} ({clean_baseline_kg.filtered_by_predicate/total_processed*100:.2f}%)")
     logger.info(f"  Filtered by source: {clean_baseline_kg.filtered_by_source:,} ({clean_baseline_kg.filtered_by_source/total_processed*100:.2f}%)")
     logger.info(f"  Filtered by Reactome (non-human): {clean_baseline_kg.filtered_by_reactome:,} ({clean_baseline_kg.filtered_by_reactome/total_processed*100:.2f}%)")
@@ -408,7 +469,10 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
     # Compute low-degree nodes if using clean_baseline style
     low_degree_nodes = None
     if style == "clean_baseline":
-        low_degree_nodes = compute_low_degree_nodes(edges_file, min_degree=min_degree)
+        # First collect nodes from biolink:treats edges (protected from filtering)
+        treats_nodes = collect_treats_edge_nodes(edges_file)
+        # Then compute low-degree nodes, excluding treats nodes
+        low_degree_nodes = compute_low_degree_nodes(edges_file, min_degree=min_degree, protected_nodes=treats_nodes)
 
     # Process edges
     logger.info(f"Processing edges from {edges_file}...")
