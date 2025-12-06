@@ -27,9 +27,11 @@ configfile: "config.yaml"
 STYLE = config.get("style", "CGGD_alltreat")
 BASE_DIR = f"{config['BASE_DIR']}/{STYLE}"
 
-# Define all final outputs
+# Define all final outputs (full pipeline)
 rule all:
     input:
+        # Create train_candidates
+        f"{BASE_DIR}/train_candidates.txt"
         # Train/valid split
         f"{BASE_DIR}/train.txt",
         f"{BASE_DIR}/valid.txt",
