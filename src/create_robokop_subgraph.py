@@ -150,8 +150,7 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
 
     filtered_predicates = ["biolink:in_taxon", "biolink:related_to", "biolink:expressed_in",
                           "biolink:located_in", "biolink:temporally_related_to",
-                          "biolink:affects_response_to", "biolink:decreases_response_to",
-                          "biolink:increases_response_to"]
+                          ]
 
     filtered_sources = ["infores:text-mining-provider-targeted", "infores:zfin", "infores:tiga",
                        "infores:flybase", "infores:sgd", "infores:rgd", "infores:mgi"]
