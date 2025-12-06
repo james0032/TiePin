@@ -27,11 +27,9 @@ configfile: "config.yaml"
 STYLE = config.get("style", "CGGD_alltreat")
 BASE_DIR = f"{config['BASE_DIR']}/{STYLE}"
 
-# Define all final outputs (full pipeline)
+# Define all final outputs (full pipeline - requires dict files)
 rule all:
     input:
-        # Create train_candidates
-        f"{BASE_DIR}/train_candidates.txt"
         # Train/valid split
         f"{BASE_DIR}/train.txt",
         f"{BASE_DIR}/valid.txt",
@@ -40,6 +38,23 @@ rule all:
         # Evaluation results
         f"{BASE_DIR}/results/evaluation/test_scores.json",
         f"{BASE_DIR}/results/evaluation/test_scores_ranked.json"
+
+# Default target: only data preparation (NO dict files needed)
+# Use this when you don't have node_dict.txt and rel_dict.txt yet
+rule prepare_data:
+    input:
+        # Create train_candidates
+        f"{BASE_DIR}/train_candidates.txt",
+        # Train/valid split
+        f"{BASE_DIR}/train.txt",
+        f"{BASE_DIR}/valid.txt",
+        # Split statistics
+        f"{BASE_DIR}/split_statistics.json"
+
+# Minimal target: only create train_candidates
+rule step3_only:
+    input:
+        f"{BASE_DIR}/train_candidates.txt"
 
 # ============================================================================
 # Step 3: Create Train Candidates from Fixed Test Set
