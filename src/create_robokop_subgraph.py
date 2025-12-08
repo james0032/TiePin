@@ -265,8 +265,8 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
                 affinity_value = attr.get("value")
                 break
 
-        # If affinity is None or <= 7, filter out the edge
-        if affinity_value is None or affinity_value <= 7:
+        # If affinity is not None and <= 7, filter out the edge
+        if affinity_value is not None and affinity_value <= 7:
             clean_baseline_kg.filtered_by_bindingdb += 1
             return True
 
