@@ -194,7 +194,9 @@ rule extract_drugmechdb_test:
     input:
         subgraph = f"{BASE_DIR}/rotorobo.txt",
         edge_map = f"{BASE_DIR}/edge_map.json",  # Required: maps biolink:treats to predicate IDs
-        filtered_tsv = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_treats_filtered.txt"
+        filtered_tsv = f"{BASE_DIR}/results/mechanistic_paths/drugmechdb_treats_filtered.txt",
+        # Force Step 1b to run (dict files not used in this step but needed for pipeline completeness)
+        node_dict = f"{BASE_DIR}/processed/node_dict.txt"
     output:
         test = f"{BASE_DIR}/test.txt",
         train_candidates = f"{BASE_DIR}/train_candidates.txt",
