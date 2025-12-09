@@ -263,21 +263,9 @@ def clean_baseline_kg(edge, typemap, treats_nodes=None):
 
     # Filter 2: BindingDB affinity filter
     # If source is bindingdb, only keep if affinity is not None and >= 7
-    if edge.get("predicate") == "biolink:affects":
+    if predicate == "biolink:affects":
         if source == "infores:bindingdb":
-            affinity_value = None
-
-            # Try to get affinity from properties dict (Neo4j format)
-            properties = edge.get("properties", {})
-            if "affinity" in properties:
-                affinity_value = properties.get("affinity")
-            else:
-                # Fall back to attributes list (JSONL format)
-                attributes = edge.get("attributes", [])
-                for attr in attributes:
-                    if attr.get("attribute_type_id") == "affinity":
-                        affinity_value = attr.get("value")
-                        break
+            affinity_value = edge.get("affinity")
 
             # If affinity is not None and < 7, filter out the edge
             if affinity_value is not None:
