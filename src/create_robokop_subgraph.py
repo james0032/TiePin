@@ -182,7 +182,7 @@ def compute_low_degree_nodes(edges_file, min_degree=2, protected_nodes=None):
     return low_degree_nodes
 
 
-def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
+def clean_baseline_kg(edge, typemap, treats_nodes=None):
     # return True if you want to filter this edge out
     # We want to keep edges between chemicals and genes, between genes and disease, and between chemicals and diseases
     # Unfortunately this means that we need a type map... Dangit
@@ -199,8 +199,11 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
         clean_baseline_kg.filtered_by_low_degree = 0
         clean_baseline_kg.kept_edges = 0
         clean_baseline_kg.kept_treats_edges = 0
+        clean_baseline_kg.kept_treats_node_edges = 0
 
     predicate = edge.get("predicate", "")
+    subject = edge.get("subject", "")
+    obj = edge.get("object", "")
 
     # TOP FILTER: Always keep biolink:treats edges
     # These edges and their nodes are protected from all filtering
@@ -208,6 +211,13 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
         clean_baseline_kg.kept_treats_edges += 1
         clean_baseline_kg.kept_edges += 1
         return False
+
+    # SECOND FILTER: Keep edges involving treats nodes (protect treats node connectivity)
+    if treats_nodes is not None:
+        if subject in treats_nodes or obj in treats_nodes:
+            clean_baseline_kg.kept_treats_node_edges += 1
+            clean_baseline_kg.kept_edges += 1
+            return False
 
     filtered_predicates = ["biolink:in_taxon", "biolink:related_to", "biolink:expressed_in",
                           "biolink:located_in", "biolink:temporally_related_to",
@@ -217,8 +227,6 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
                        "infores:flybase", "infores:sgd", "infores:rgd", "infores:mgi"]
     # additional filters: non-human from reactome. text mined kp, affinity <7 from binidngdb. NCIT nodes using subclass_of predicate. Take out degree 1 or degree 2 nodes.
     source = edge.get("primary_knowledge_source", "")
-    subject = edge.get("subject", "")
-    obj = edge.get("object", "")
 
     # Track predicate
     if predicate not in clean_baseline_kg.predicate_counter:
@@ -288,12 +296,8 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
             clean_baseline_kg.filtered_by_ncit_subclass += 1
             return True
 
-    # Filter 4: Low-degree nodes
-    # If subject or object is in low_degree_nodes, remove edge
-    if low_degree_nodes is not None:
-        if subject in low_degree_nodes or obj in low_degree_nodes:
-            clean_baseline_kg.filtered_by_low_degree += 1
-            return True
+    # NOTE: Low-degree filtering is now applied as post-processing
+    # (see apply_low_degree_filter function below)
 
     # Original filters
     if predicate in filtered_predicates:
@@ -305,6 +309,91 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
 
     clean_baseline_kg.kept_edges += 1
     return False
+
+def apply_low_degree_filter(input_file, output_file, min_degree=2, treats_nodes=None):
+    """
+    Apply low-degree filtering as post-processing step.
+    Reads filtered graph, computes degrees, and removes edges with low-degree nodes.
+
+    Parameters
+    ----------
+    input_file : str
+        Path to the filtered graph file (TSV format: subject\tpredicate\tobject)
+    output_file : str
+        Path to write the final filtered graph
+    min_degree : int
+        Minimum degree threshold
+    treats_nodes : set
+        Set of nodes from treats edges to protect from filtering
+
+    Returns
+    -------
+    dict
+        Statistics about the filtering process
+    """
+    logger.info(f"Applying low-degree filter (min_degree={min_degree})...")
+
+    if treats_nodes is None:
+        treats_nodes = set()
+
+    # First pass: compute degrees from the filtered graph
+    degree_count = defaultdict(int)
+    total_edges = 0
+
+    with open(input_file, 'r') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) != 3:
+                continue
+            subject, predicate, obj = parts
+            degree_count[subject] += 1
+            degree_count[obj] += 1
+            total_edges += 1
+
+    # Find low-degree nodes (excluding treats nodes)
+    low_degree_nodes = {
+        node for node, degree in degree_count.items()
+        if degree < min_degree and node not in treats_nodes
+    }
+
+    logger.info(f"Found {len(low_degree_nodes):,} low-degree nodes (degree < {min_degree}) out of {len(degree_count):,} total nodes")
+    logger.info(f"Protected {len(treats_nodes):,} nodes from low-degree filtering")
+
+    # Second pass: filter out edges with low-degree nodes
+    kept_edges = 0
+    filtered_edges = 0
+
+    with open(input_file, 'r') as fin:
+        with open(output_file, 'w') as fout:
+            for line in fin:
+                parts = line.strip().split('\t')
+                if len(parts) != 3:
+                    continue
+                subject, predicate, obj = parts
+
+                # Filter if either node is low-degree
+                if subject in low_degree_nodes or obj in low_degree_nodes:
+                    filtered_edges += 1
+                else:
+                    fout.write(line)
+                    kept_edges += 1
+
+    stats = {
+        'total_edges_before': total_edges,
+        'low_degree_nodes_count': len(low_degree_nodes),
+        'edges_filtered': filtered_edges,
+        'edges_kept': kept_edges,
+        'protected_nodes': len(treats_nodes)
+    }
+
+    logger.info(f"Low-degree filtering complete:")
+    logger.info(f"  Edges before: {total_edges:,}")
+    logger.info(f"  Edges filtered: {filtered_edges:,}")
+    logger.info(f"  Edges kept: {kept_edges:,}")
+    logger.info(f"  Filter rate: {(filtered_edges/total_edges*100):.2f}%")
+
+    return stats
+
 
 def log_clean_baseline_kg_stats():
     """Log statistics about what clean_baseline_kg has processed."""
@@ -319,6 +408,7 @@ def log_clean_baseline_kg_stats():
     total_processed = sum(clean_baseline_kg.predicate_counter.values())
     logger.info(f"Total edges processed: {total_processed:,}")
     logger.info(f"  Kept biolink:treats edges (protected): {clean_baseline_kg.kept_treats_edges:,} ({clean_baseline_kg.kept_treats_edges/total_processed*100:.2f}%)")
+    logger.info(f"  Kept edges with treats nodes (protected): {clean_baseline_kg.kept_treats_node_edges:,} ({clean_baseline_kg.kept_treats_node_edges/total_processed*100:.2f}%)")
     logger.info(f"  Filtered by predicate: {clean_baseline_kg.filtered_by_predicate:,} ({clean_baseline_kg.filtered_by_predicate/total_processed*100:.2f}%)")
     logger.info(f"  Filtered by source: {clean_baseline_kg.filtered_by_source:,} ({clean_baseline_kg.filtered_by_source/total_processed*100:.2f}%)")
     logger.info(f"  Filtered by Reactome (non-human): {clean_baseline_kg.filtered_by_reactome:,} ({clean_baseline_kg.filtered_by_reactome/total_processed*100:.2f}%)")
@@ -477,31 +567,32 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
 
     logger.info(f"Type map created with {len(type_map)} nodes")
 
-    # Compute low-degree nodes if using clean_baseline style
-    low_degree_nodes = None
+    # Collect treats nodes if using clean_baseline style
+    treats_nodes = None
     if style == "clean_baseline":
-        # First collect nodes from biolink:treats edges (protected from filtering)
+        # Collect nodes from biolink:treats edges (protected from low-degree filtering)
         treats_nodes = collect_treats_edge_nodes(edges_file)
-        # Then compute low-degree nodes, excluding treats nodes
-        low_degree_nodes = compute_low_degree_nodes(edges_file, min_degree=min_degree, protected_nodes=treats_nodes)
 
-    # Process edges
+    # Process edges - Step 1: Apply all filters EXCEPT low-degree
     logger.info(f"Processing edges from {edges_file}...")
     edge_map = {}
     total_edges = 0
     filtered_edges = 0
     kept_edges = 0
 
+    # For clean_baseline, write to temporary file first (before low-degree filtering)
+    temp_output_file = output_file + ".tmp" if style == "clean_baseline" else output_file
+
     with jsonlines.open(edges_file) as reader:
-        with open(output_file, "w") as writer:
+        with open(temp_output_file, "w") as writer:
             for edge in reader:
                 total_edges += 1
                 if total_edges % 100000 == 0:
                     logger.info(f"Processed {total_edges} edges, kept {kept_edges}, filtered {filtered_edges}")
 
-                # Pass low_degree_nodes to clean_baseline_kg if applicable
+                # Pass treats_nodes to clean_baseline_kg if applicable
                 if style == "clean_baseline":
-                    if remove_edge(edge, type_map, low_degree_nodes):
+                    if remove_edge(edge, type_map, treats_nodes):
                         filtered_edges += 1
                         continue
                 else:
@@ -512,7 +603,7 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
                 writer.write(f"{edge['subject']}\t{pred_trans(edge,edge_map)}\t{edge['object']}\n")
                 kept_edges += 1
 
-    logger.info(f"Edge processing complete:")
+    logger.info(f"Initial edge filtering complete:")
     logger.info(f"  Total edges processed: {total_edges}")
     logger.info(f"  Edges kept: {kept_edges}")
     logger.info(f"  Edges filtered: {filtered_edges}")
@@ -521,6 +612,23 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
     # Log detailed statistics if using clean_baseline style
     if style == "clean_baseline":
         log_clean_baseline_kg_stats()
+
+    # Step 2: Apply low-degree filtering as post-processing (only for clean_baseline)
+    if style == "clean_baseline":
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("STEP 2: POST-PROCESSING LOW-DEGREE FILTER")
+        logger.info("=" * 80)
+        low_degree_stats = apply_low_degree_filter(
+            temp_output_file,
+            output_file,
+            min_degree=min_degree,
+            treats_nodes=treats_nodes
+        )
+        # Remove temporary file
+        import os
+        os.remove(temp_output_file)
+        logger.info(f"Removed temporary file: {temp_output_file}")
 
     dump_edge_map(edge_map, outdir)
     logger.info(f"Subgraph creation complete! Output written to {output_file}")

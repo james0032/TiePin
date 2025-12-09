@@ -289,7 +289,7 @@ rule train_model:
         random_seed = config.get("random_seed", 42),
         no_early_stopping = "" if config.get("early_stopping", True) else "--no-early-stopping",
         gpu = "" if config.get("use_gpu", True) else "--no-gpu",
-        checkpoint_dir_arg = f"--checkpoint-dir {config.get('checkpoint_dir')}" if config.get("checkpoint_dir") else "",
+        checkpoint_dir_arg = f"--checkpoint-dir {BASE_DIR}/{config.get('checkpoint_dir')}" if config.get("checkpoint_dir") else "",
         skip_evaluation = "--skip-evaluation" if config.get("skip_evaluation", False) else ""
     log:
         f"{BASE_DIR}/logs/train_model.log"
