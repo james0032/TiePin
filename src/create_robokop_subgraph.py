@@ -254,21 +254,32 @@ def clean_baseline_kg(edge, typemap, low_degree_nodes=None):
             return True
 
     # Filter 2: BindingDB affinity filter
-    # If source is bindingdb, only keep if affinity is not None and > 7
-    if source == "infores:bindingdb":
-        # Check for affinity attribute in edge attributes
-        attributes = edge.get("attributes", [])
-        affinity_value = None
+    # If source is bindingdb, only keep if affinity is not None and >= 7
+    if edge.get("predicate") == "biolink:affects":
+        if source == "infores:bindingdb":
+            affinity_value = None
 
-        for attr in attributes:
-            if attr.get("attribute_type_id") == "affinity":
-                affinity_value = attr.get("value")
-                break
+            # Try to get affinity from properties dict (Neo4j format)
+            properties = edge.get("properties", {})
+            if "affinity" in properties:
+                affinity_value = properties.get("affinity")
+            else:
+                # Fall back to attributes list (JSONL format)
+                attributes = edge.get("attributes", [])
+                for attr in attributes:
+                    if attr.get("attribute_type_id") == "affinity":
+                        affinity_value = attr.get("value")
+                        break
 
-        # If affinity is not None and <= 7, filter out the edge
-        if affinity_value is not None and affinity_value <= 7:
-            clean_baseline_kg.filtered_by_bindingdb += 1
-            return True
+            # If affinity is not None and < 7, filter out the edge
+            if affinity_value is not None:
+                try:
+                    if float(affinity_value) < 7:
+                        clean_baseline_kg.filtered_by_bindingdb += 1
+                        return True
+                except (ValueError, TypeError):
+                    # If conversion fails, keep the edge (don't filter)
+                    pass
 
     # Filter 3: NCIT subclass_of edges
     # If predicate is biolink:subclass_of and both subject and object have prefix "NCIT", remove
