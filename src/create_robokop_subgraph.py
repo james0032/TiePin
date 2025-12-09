@@ -310,7 +310,7 @@ def clean_baseline_kg(edge, typemap, treats_nodes=None):
     clean_baseline_kg.kept_edges += 1
     return False
 
-def apply_low_degree_filter(input_file, output_file, min_degree=2, treats_nodes=None):
+def apply_low_degree_filter(input_file, output_file, min_degree=2, treats_nodes=None, output_dir=None):
     """
     Apply low-degree filtering as post-processing step.
     Reads filtered graph, computes degrees, and removes edges with low-degree nodes.
@@ -325,6 +325,8 @@ def apply_low_degree_filter(input_file, output_file, min_degree=2, treats_nodes=
         Minimum degree threshold
     treats_nodes : set
         Set of nodes from treats edges to protect from filtering
+    output_dir : str, optional
+        Directory to save degree frequency statistics
 
     Returns
     -------
@@ -349,6 +351,21 @@ def apply_low_degree_filter(input_file, output_file, min_degree=2, treats_nodes=
             degree_count[subject] += 1
             degree_count[obj] += 1
             total_edges += 1
+
+    # Calculate degree frequency distribution
+    degree_frequency = defaultdict(int)
+    for node, degree in degree_count.items():
+        degree_frequency[degree] += 1
+
+    # Save degree frequency to CSV
+    if output_dir:
+        degree_freq_file = os.path.join(output_dir, "node_degree_frequency.csv")
+        logger.info(f"Writing node degree frequency to {degree_freq_file}")
+        with open(degree_freq_file, 'w') as f:
+            f.write("degree,count\n")
+            for degree in sorted(degree_frequency.keys()):
+                f.write(f"{degree},{degree_frequency[degree]}\n")
+        logger.info(f"Saved degree frequency distribution with {len(degree_frequency)} unique degree values")
 
     # Find low-degree nodes (excluding treats nodes)
     low_degree_nodes = {
@@ -623,7 +640,8 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
             temp_output_file,
             output_file,
             min_degree=min_degree,
-            treats_nodes=treats_nodes
+            treats_nodes=treats_nodes,
+            output_dir=outdir
         )
         # Remove temporary file
         os.remove(temp_output_file)
