@@ -626,7 +626,6 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
             treats_nodes=treats_nodes
         )
         # Remove temporary file
-        import os
         os.remove(temp_output_file)
         logger.info(f"Removed temporary file: {temp_output_file}")
 
