@@ -57,9 +57,12 @@ def keep_CD(edge, typemap):
     # return True if you want to filter this edge out
     # We want to keep edges between chemicals and genes, between genes and disease, and between chemicals and diseases
     # Unfortunately this means that we need a type map... Dangit
-    if edge["predicate"] == "biolink:subclass_of":
-        return True
-    accepted = [ ("biolink:ChemicalEntity", "biolink:DiseaseOrPhenotypicFeature") ]
+    if edge["predicate"] == "biolink:treats":
+        return False
+    accepted = [ ("biolink:ChemicalEntity", "biolink:DiseaseOrPhenotypicFeature"),
+                ("biolink:ChemicalEntity", "biolink:ChemicalEntity"),
+                ("biolink:DiseaseOrPhenotypicFeature", "biolink:DiseaseOrPhenotypicFeature")
+    ]
     return check_accepted(edge, typemap, accepted)
 
 def keep_CCGGDD(edge, typemap):
