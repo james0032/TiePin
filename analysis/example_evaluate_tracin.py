@@ -3,27 +3,40 @@
 Example script demonstrating the usage of TracIn metric evaluation functions.
 
 This script shows how to:
-1. Test the distribution of TracInScore between On_specific_path groups
-2. Apply permutation testing to evaluate significance of metrics
+1. Test the distribution of TracInScore between On_specific_path groups (single file)
+2. Apply permutation testing to evaluate significance of metrics (single file)
+3. Batch analyze multiple files with all tests
 
 Usage:
-    python example_evaluate_tracin.py
+    # Single file analysis
+    python example_evaluate_tracin.py --single-file
+
+    # Batch analysis of all files in directory
+    python example_evaluate_tracin.py --batch
+
+    # Batch analysis with all tests (WARNING: slow for many files)
+    python example_evaluate_tracin.py --batch --all-tests
 """
 
+import argparse
 from pathlib import Path
 from evaluate_tracin_metrics import (
     test_tracin_score_distribution,
     print_distribution_test_results,
     permutation_test_metrics,
-    print_permutation_test_results
+    print_permutation_test_results,
+    analyze_all_files,
+    print_all_results_summary
 )
 
-def main():
+
+def single_file_example():
+    """Example: Analyze a single file with detailed tests."""
     # Path to example CSV file
     csv_file = Path("/Users/jchung/Documents/RENCI/everycure/git/conve_pykeen/data/CGGD_alltreat/triple_049_CHEBI_68595_MONDO_0005354_tracin_with_gt.csv")
 
     print("="*80)
-    print("TRACIN METRICS EVALUATION EXAMPLE")
+    print("SINGLE FILE TRACIN METRICS EVALUATION")
     print("="*80)
     print(f"\nAnalyzing file: {csv_file.name}")
 
@@ -84,6 +97,83 @@ def main():
     print("\n" + "="*80)
     print("ANALYSIS COMPLETE")
     print("="*80)
+
+
+def batch_analysis_example(include_all_tests=False):
+    """Example: Batch analyze multiple files."""
+    # Path to directory containing CSV files
+    input_dir = Path("/Users/jchung/Documents/RENCI/everycure/git/conve_pykeen/data/CGGD_alltreat")
+    output_path = input_dir / "tracin_evaluation_results.csv"
+
+    print("="*80)
+    print("BATCH TRACIN METRICS EVALUATION")
+    print("="*80)
+    print(f"\nInput directory: {input_dir}")
+    print(f"Output path: {output_path}")
+
+    if include_all_tests:
+        print("\nWARNING: Running distribution and permutation tests on all files.")
+        print("This may take a considerable amount of time depending on the number of files.")
+        print("Each permutation test runs 1000 permutations per file.\n")
+
+    # Analyze all files
+    results_dict = analyze_all_files(
+        input_dir=input_dir,
+        pattern="*_with_gt.csv",
+        output_path=output_path,
+        include_distribution_tests=include_all_tests,
+        include_permutation_tests=include_all_tests,
+        n_permutations=1000
+    )
+
+    # Print comprehensive summary
+    print_all_results_summary(results_dict)
+
+    print("\n" + "="*80)
+    print("BATCH ANALYSIS COMPLETE")
+    print("="*80)
+    print(f"\nResults saved to:")
+    print(f"  Basic metrics: {output_path}")
+
+    if include_all_tests:
+        if not results_dict['distribution_tests'].empty:
+            dist_output = output_path.parent / f"{output_path.stem}_distribution_tests.csv"
+            print(f"  Distribution tests: {dist_output}")
+
+        if not results_dict['permutation_tests'].empty:
+            perm_output = output_path.parent / f"{output_path.stem}_permutation_tests.csv"
+            print(f"  Permutation tests: {perm_output}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Example usage of TracIn metric evaluation functions'
+    )
+    parser.add_argument(
+        '--single-file',
+        action='store_true',
+        help='Run single file analysis example'
+    )
+    parser.add_argument(
+        '--batch',
+        action='store_true',
+        help='Run batch analysis example'
+    )
+    parser.add_argument(
+        '--all-tests',
+        action='store_true',
+        help='Include distribution and permutation tests in batch analysis (WARNING: slow)'
+    )
+
+    args = parser.parse_args()
+
+    if args.single_file:
+        single_file_example()
+    elif args.batch:
+        batch_analysis_example(include_all_tests=args.all_tests)
+    else:
+        print("Please specify either --single-file or --batch mode.")
+        print("Use --help for more information.")
 
 
 if __name__ == "__main__":

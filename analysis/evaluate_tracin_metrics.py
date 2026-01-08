@@ -215,7 +215,10 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'In_path') -> Dict
 
 
 def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
-                      output_path: Path = None) -> pd.DataFrame:
+                      output_path: Path = None,
+                      include_distribution_tests: bool = False,
+                      include_permutation_tests: bool = False,
+                      n_permutations: int = 1000) -> Dict[str, pd.DataFrame]:
     """
     Analyze all TracIn files matching the pattern in the input directory.
 
@@ -227,11 +230,20 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
         Glob pattern to match files (default: "*_with_gt.csv")
     output_path : Path, optional
         Path to save the results CSV
+    include_distribution_tests : bool
+        Whether to include distribution tests (default: False)
+    include_permutation_tests : bool
+        Whether to include permutation tests (default: False)
+    n_permutations : int
+        Number of permutations for permutation tests (default: 1000)
 
     Returns
     -------
-    pd.DataFrame
-        Results table with MRR, MAP, and statistics for each file
+    Dict[str, pd.DataFrame]
+        Dictionary containing:
+        - 'basic_metrics': MRR, MAP, and basic statistics
+        - 'distribution_tests': Distribution test results (if included)
+        - 'permutation_tests': Permutation test results (if included)
     """
     # Find all matching files
     csv_files = list(input_dir.glob(pattern))
@@ -245,33 +257,94 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
 
     if not csv_files:
         logger.error(f"No files found!")
-        return pd.DataFrame()
+        return {'basic_metrics': pd.DataFrame()}
 
     logger.info(f"Found {len(csv_files)} files to process")
 
     # Process each file
-    results = []
+    basic_results = []
+    distribution_results = []
+    permutation_results = []
+
     for csv_file in sorted(csv_files):
         try:
+            # Basic metrics (MRR, MAP, etc.)
             result = analyze_tracin_file(csv_file)
-            results.append(result)
+            basic_results.append(result)
+
+            # Distribution tests
+            if include_distribution_tests:
+                try:
+                    dist_result = test_tracin_score_distribution(csv_file)
+                    if dist_result:
+                        distribution_results.append(dist_result)
+                except Exception as e:
+                    logger.error(f"Error in distribution test for {csv_file.name}: {e}")
+
+            # Permutation tests
+            if include_permutation_tests:
+                try:
+                    perm_result = permutation_test_metrics(
+                        csv_file,
+                        n_permutations=n_permutations,
+                        on_path_column='On_specific_path',
+                        in_path_column='In_path',
+                        score_column='TracInScore'
+                    )
+                    if perm_result:
+                        # Remove full distributions from results (too large for table)
+                        perm_result_summary = {k: v for k, v in perm_result.items()
+                                              if not k.endswith('_dist')}
+                        permutation_results.append(perm_result_summary)
+                except Exception as e:
+                    logger.error(f"Error in permutation test for {csv_file.name}: {e}")
+
         except Exception as e:
             logger.error(f"Error processing {csv_file.name}: {e}")
             continue
 
-    # Create results dataframe
-    results_df = pd.DataFrame(results)
+    # Create results dataframes
+    results_dict = {}
 
-    # Sort by MRR (descending)
-    if not results_df.empty:
-        results_df = results_df.sort_values('mrr', ascending=False).reset_index(drop=True)
+    # Basic metrics
+    basic_df = pd.DataFrame(basic_results)
+    if not basic_df.empty:
+        basic_df = basic_df.sort_values('mrr', ascending=False).reset_index(drop=True)
+    results_dict['basic_metrics'] = basic_df
+
+    # Distribution tests
+    if include_distribution_tests and distribution_results:
+        dist_df = pd.DataFrame(distribution_results)
+        results_dict['distribution_tests'] = dist_df
+    else:
+        results_dict['distribution_tests'] = pd.DataFrame()
+
+    # Permutation tests
+    if include_permutation_tests and permutation_results:
+        perm_df = pd.DataFrame(permutation_results)
+        results_dict['permutation_tests'] = perm_df
+    else:
+        results_dict['permutation_tests'] = pd.DataFrame()
 
     # Save results
     if output_path:
-        results_df.to_csv(output_path, index=False)
-        logger.info(f"Results saved to {output_path}")
+        # Save basic metrics
+        basic_df.to_csv(output_path, index=False)
+        logger.info(f"Basic metrics saved to {output_path}")
 
-    return results_df
+        # Save distribution tests
+        if include_distribution_tests and not results_dict['distribution_tests'].empty:
+            dist_output = output_path.parent / f"{output_path.stem}_distribution_tests.csv"
+            results_dict['distribution_tests'].to_csv(dist_output, index=False)
+            logger.info(f"Distribution test results saved to {dist_output}")
+
+        # Save permutation tests
+        if include_permutation_tests and not results_dict['permutation_tests'].empty:
+            perm_output = output_path.parent / f"{output_path.stem}_permutation_tests.csv"
+            results_dict['permutation_tests'].to_csv(perm_output, index=False)
+            logger.info(f"Permutation test results saved to {perm_output}")
+
+    return results_dict
 
 
 def print_summary_statistics(results_df: pd.DataFrame):
@@ -316,6 +389,169 @@ def print_summary_statistics(results_df: pd.DataFrame):
     print(f"  Median rank of first relevant: {results_df['median_rank_first_relevant'].median():.2f}")
 
     print("\n" + "="*80)
+
+
+def print_distribution_summary_statistics(results_df: pd.DataFrame):
+    """
+    Print summary statistics for distribution test results.
+
+    Parameters
+    ----------
+    results_df : pd.DataFrame
+        Distribution test results dataframe
+    """
+    if results_df.empty:
+        logger.warning("No distribution test results to summarize")
+        return
+
+    print("\n" + "="*80)
+    print("DISTRIBUTION TEST SUMMARY STATISTICS")
+    print("="*80)
+
+    print(f"\nNumber of files analyzed: {len(results_df)}")
+
+    # Overall distribution differences
+    print(f"\nTracInScore Differences (On_path - Off_path):")
+    print(f"  Mean difference:")
+    mean_diffs = results_df['mean_on_path'] - results_df['mean_off_path']
+    print(f"    Average:  {mean_diffs.mean():.6f}")
+    print(f"    Median:   {mean_diffs.median():.6f}")
+    print(f"    Min:      {mean_diffs.min():.6f}")
+    print(f"    Max:      {mean_diffs.max():.6f}")
+
+    print(f"\n  Median difference:")
+    median_diffs = results_df['median_on_path'] - results_df['median_off_path']
+    print(f"    Average:  {median_diffs.mean():.6f}")
+    print(f"    Median:   {median_diffs.median():.6f}")
+    print(f"    Min:      {median_diffs.min():.6f}")
+    print(f"    Max:      {median_diffs.max():.6f}")
+
+    # Effect sizes
+    print(f"\nEffect Sizes (Cohen's d):")
+    print(f"  Mean:   {results_df['cohens_d'].mean():.4f}")
+    print(f"  Median: {results_df['cohens_d'].median():.4f}")
+    print(f"  Min:    {results_df['cohens_d'].min():.4f}")
+    print(f"  Max:    {results_df['cohens_d'].max():.4f}")
+
+    # Count interpretations
+    print(f"\n  Effect size interpretations:")
+    interpretation_counts = results_df['effect_size_interpretation'].value_counts()
+    for interp, count in interpretation_counts.items():
+        print(f"    {interp.capitalize()}: {count} ({count/len(results_df)*100:.1f}%)")
+
+    # Test significance
+    print(f"\nStatistical Significance (α=0.05):")
+    print(f"  T-test significant: {(results_df['ttest_pvalue'] < 0.05).sum()} / {len(results_df)} "
+          f"({(results_df['ttest_pvalue'] < 0.05).mean()*100:.1f}%)")
+    print(f"  Mann-Whitney significant: {(results_df['mannwhitney_pvalue'] < 0.05).sum()} / {len(results_df)} "
+          f"({(results_df['mannwhitney_pvalue'] < 0.05).mean()*100:.1f}%)")
+    print(f"  KS-test significant: {(results_df['ks_pvalue'] < 0.05).sum()} / {len(results_df)} "
+          f"({(results_df['ks_pvalue'] < 0.05).mean()*100:.1f}%)")
+
+    # Normality
+    print(f"\nNormality (Shapiro-Wilk, α=0.05):")
+    print(f"  On_path normal: {results_df['normal_on_path'].sum()} / {len(results_df)} "
+          f"({results_df['normal_on_path'].mean()*100:.1f}%)")
+    print(f"  Off_path normal: {results_df['normal_off_path'].sum()} / {len(results_df)} "
+          f"({results_df['normal_off_path'].mean()*100:.1f}%)")
+
+    print("\n" + "="*80)
+
+
+def print_permutation_summary_statistics(results_df: pd.DataFrame):
+    """
+    Print summary statistics for permutation test results.
+
+    Parameters
+    ----------
+    results_df : pd.DataFrame
+        Permutation test results dataframe
+    """
+    if results_df.empty:
+        logger.warning("No permutation test results to summarize")
+        return
+
+    print("\n" + "="*80)
+    print("PERMUTATION TEST SUMMARY STATISTICS")
+    print("="*80)
+
+    print(f"\nNumber of files analyzed: {len(results_df)}")
+    print(f"Permutations per file: {results_df['n_permutations'].iloc[0]}")
+
+    # MRR significance
+    print(f"\nMRR (Mean Reciprocal Rank) Significance:")
+    print(f"  Files with p < 0.05: {(results_df['p_value_mrr'] < 0.05).sum()} / {len(results_df)} "
+          f"({(results_df['p_value_mrr'] < 0.05).mean()*100:.1f}%)")
+    print(f"  Files with p < 0.01: {(results_df['p_value_mrr'] < 0.01).sum()} / {len(results_df)} "
+          f"({(results_df['p_value_mrr'] < 0.01).mean()*100:.1f}%)")
+    print(f"  Mean p-value: {results_df['p_value_mrr'].mean():.4f}")
+    print(f"  Median p-value: {results_df['p_value_mrr'].median():.4f}")
+
+    # MAP significance
+    print(f"\nMAP (Mean Average Precision) Significance:")
+    print(f"  Files with p < 0.05: {(results_df['p_value_map'] < 0.05).sum()} / {len(results_df)} "
+          f"({(results_df['p_value_map'] < 0.05).mean()*100:.1f}%)")
+    print(f"  Files with p < 0.01: {(results_df['p_value_map'] < 0.01).sum()} / {len(results_df)} "
+          f"({(results_df['p_value_map'] < 0.01).mean()*100:.1f}%)")
+    print(f"  Mean p-value: {results_df['p_value_map'].mean():.4f}")
+    print(f"  Median p-value: {results_df['p_value_map'].median():.4f}")
+
+    # Distribution difference significance
+    print(f"\nTracInScore Mean Difference Significance:")
+    print(f"  Files with p < 0.05: {(results_df['p_value_mean_diff'] < 0.05).sum()} / {len(results_df)} "
+          f"({(results_df['p_value_mean_diff'] < 0.05).mean()*100:.1f}%)")
+    print(f"  Files with p < 0.01: {(results_df['p_value_mean_diff'] < 0.01).sum()} / {len(results_df)} "
+          f"({(results_df['p_value_mean_diff'] < 0.01).mean()*100:.1f}%)")
+    print(f"  Mean p-value: {results_df['p_value_mean_diff'].mean():.4f}")
+    print(f"  Median p-value: {results_df['p_value_mean_diff'].median():.4f}")
+
+    print(f"\nTracInScore Median Difference Significance:")
+    print(f"  Files with p < 0.05: {(results_df['p_value_median_diff'] < 0.05).sum()} / {len(results_df)} "
+          f"({(results_df['p_value_median_diff'] < 0.05).mean()*100:.1f}%)")
+    print(f"  Files with p < 0.01: {(results_df['p_value_median_diff'] < 0.01).sum()} / {len(results_df)} "
+          f"({(results_df['p_value_median_diff'] < 0.01).mean()*100:.1f}%)")
+    print(f"  Mean p-value: {results_df['p_value_median_diff'].mean():.4f}")
+    print(f"  Median p-value: {results_df['p_value_median_diff'].median():.4f}")
+
+    # Overall significance
+    print(f"\nOverall Significance Assessment:")
+    # Count files where MRR AND MAP are both significant
+    both_sig = ((results_df['p_value_mrr'] < 0.05) & (results_df['p_value_map'] < 0.05)).sum()
+    print(f"  Files with both MRR & MAP significant (p < 0.05): {both_sig} / {len(results_df)} "
+          f"({both_sig/len(results_df)*100:.1f}%)")
+
+    # Count files where distribution tests are significant
+    dist_sig = ((results_df['p_value_mean_diff'] < 0.05) | (results_df['p_value_median_diff'] < 0.05)).sum()
+    print(f"  Files with distribution difference significant (p < 0.05): {dist_sig} / {len(results_df)} "
+          f"({dist_sig/len(results_df)*100:.1f}%)")
+
+    print("\n" + "="*80)
+
+
+def print_all_results_summary(results_dict: Dict[str, pd.DataFrame]):
+    """
+    Print comprehensive summary of all analysis results.
+
+    Parameters
+    ----------
+    results_dict : Dict[str, pd.DataFrame]
+        Dictionary containing all results dataframes
+    """
+    print("\n" + "="*80)
+    print("COMPREHENSIVE ANALYSIS SUMMARY")
+    print("="*80)
+
+    # Basic metrics summary
+    if not results_dict['basic_metrics'].empty:
+        print_summary_statistics(results_dict['basic_metrics'])
+
+    # Distribution tests summary
+    if not results_dict['distribution_tests'].empty:
+        print_distribution_summary_statistics(results_dict['distribution_tests'])
+
+    # Permutation tests summary
+    if not results_dict['permutation_tests'].empty:
+        print_permutation_summary_statistics(results_dict['permutation_tests'])
 
 
 def test_tracin_score_distribution(csv_path: Path,
@@ -831,6 +1067,22 @@ def main():
         help='Name of the column indicating ground truth (default: In_path)'
     )
     parser.add_argument(
+        '--distribution-tests',
+        action='store_true',
+        help='Include distribution tests (parametric and non-parametric)'
+    )
+    parser.add_argument(
+        '--permutation-tests',
+        action='store_true',
+        help='Include permutation tests for significance evaluation'
+    )
+    parser.add_argument(
+        '--n-permutations',
+        type=int,
+        default=1000,
+        help='Number of permutations for permutation tests (default: 1000)'
+    )
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
@@ -846,30 +1098,63 @@ def main():
         args.output = args.input_dir / 'tracin_evaluation_results.csv'
 
     # Analyze all files
-    results_df = analyze_all_files(args.input_dir, args.pattern, args.output)
+    results_dict = analyze_all_files(
+        args.input_dir,
+        args.pattern,
+        args.output,
+        include_distribution_tests=args.distribution_tests,
+        include_permutation_tests=args.permutation_tests,
+        n_permutations=args.n_permutations
+    )
 
-    if not results_df.empty:
-        # Print results table
+    # Print basic metrics results
+    if not results_dict['basic_metrics'].empty:
         print("\n" + "="*80)
-        print("RESULTS TABLE")
+        print("BASIC METRICS TABLE")
         print("="*80)
-        print(results_df.to_string(index=False))
+        print(results_dict['basic_metrics'].to_string(index=False))
 
         # Print summary statistics
-        print_summary_statistics(results_df)
+        print_summary_statistics(results_dict['basic_metrics'])
 
         # Print top performers
         print("\n" + "="*80)
         print("TOP 5 FILES BY MRR")
         print("="*80)
-        top_5_mrr = results_df.nlargest(5, 'mrr')[['file', 'mrr', 'map', 'coverage']]
+        top_5_mrr = results_dict['basic_metrics'].nlargest(5, 'mrr')[['file', 'mrr', 'map', 'coverage']]
         print(top_5_mrr.to_string(index=False))
 
         print("\n" + "="*80)
         print("TOP 5 FILES BY MAP")
         print("="*80)
-        top_5_map = results_df.nlargest(5, 'map')[['file', 'mrr', 'map', 'coverage']]
+        top_5_map = results_dict['basic_metrics'].nlargest(5, 'map')[['file', 'mrr', 'map', 'coverage']]
         print(top_5_map.to_string(index=False))
+
+    # Print distribution test results
+    if not results_dict['distribution_tests'].empty:
+        print("\n" + "="*80)
+        print("DISTRIBUTION TEST RESULTS")
+        print("="*80)
+        print("\nKey columns from distribution tests:")
+        dist_key_cols = ['file', 'mean_on_path', 'mean_off_path', 'cohens_d',
+                        'ttest_pvalue', 'mannwhitney_pvalue', 'ks_pvalue']
+        available_cols = [col for col in dist_key_cols if col in results_dict['distribution_tests'].columns]
+        print(results_dict['distribution_tests'][available_cols].to_string(index=False))
+
+        print_distribution_summary_statistics(results_dict['distribution_tests'])
+
+    # Print permutation test results
+    if not results_dict['permutation_tests'].empty:
+        print("\n" + "="*80)
+        print("PERMUTATION TEST RESULTS")
+        print("="*80)
+        print("\nKey columns from permutation tests:")
+        perm_key_cols = ['file', 'observed_mrr', 'observed_map', 'observed_mean_diff',
+                        'p_value_mrr', 'p_value_map', 'p_value_mean_diff']
+        available_cols = [col for col in perm_key_cols if col in results_dict['permutation_tests'].columns]
+        print(results_dict['permutation_tests'][available_cols].to_string(index=False))
+
+        print_permutation_summary_statistics(results_dict['permutation_tests'])
 
     logger.info("Analysis complete!")
 
