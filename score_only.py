@@ -197,7 +197,8 @@ def main():
     idx_to_name = load_node_names(str(node_name_dict_path))
 
     # Load the model checkpoint
-    checkpoint = torch.load(model_file, map_location='cpu')
+    # Note: weights_only=False is needed for PyTorch 2.6+ to load PyKEEN checkpoints
+    checkpoint = torch.load(model_file, map_location='cpu', weights_only=False)
 
     # Debug: what type is the checkpoint?
     logger.info(f"Checkpoint type: {type(checkpoint)}")
