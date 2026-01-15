@@ -112,6 +112,17 @@ def main():
         default=None,
         help='Output top N highest scoring triples to a separate TSV file (format: head\\tpredicate\\ttail, no header)'
     )
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=1024,
+        help='Batch size for GPU scoring (default: 1024). Larger batches are faster but use more memory.'
+    )
+    parser.add_argument(
+        '--streaming',
+        action='store_true',
+        help='Stream results directly to CSV file without holding in memory. Use for large datasets (millions of triples).'
+    )
 
     args = parser.parse_args()
 
@@ -460,14 +471,33 @@ def main():
 
     score_type = "probabilities (0-1)" if args.use_sigmoid else "logits (can be negative)"
     logger.info(f"Scoring mode: {score_type}")
+    logger.info(f"Batch size: {args.batch_size:,}")
+    logger.info(f"Streaming mode: {args.streaming}")
 
     # Score all test triples WITHOUT computing rankings
     logger.info("Scoring test triples (this will be FAST - no ranking computation)...")
+
+    # For streaming mode, pass output path directly for streaming to CSV
+    streaming_output = args.output if args.streaming else None
+
     results = evaluator.score_dataset(
         test_triples=test_triples,
-        output_path=None,  # We'll save ourselves with entity names
-        include_labels=True  # Get CURIE labels
+        output_path=streaming_output,  # Stream directly to file if streaming mode
+        include_labels=True,  # Get CURIE labels
+        batch_size=args.batch_size,
+        streaming=args.streaming
     )
+
+    # Handle streaming mode separately - results are already written to CSV
+    if args.streaming:
+        csv_path = args.output.replace('.json', '.csv')
+        logger.info(f"✓ Done! Streaming mode - results written directly to CSV")
+        logger.info(f"✓ Results saved to: {csv_path}")
+        logger.info(f"Note: In streaming mode, ranked/sorted outputs are not generated.")
+        logger.info(f"To get ranked results, use: sort -t',' -k7 -nr {csv_path} | head -n 1000")
+        return
+
+    # Non-streaming mode: post-process results in memory
 
     # Add entity names to results
     if idx_to_name:

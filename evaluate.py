@@ -173,38 +173,183 @@ class DetailedEvaluator:
 
         return results
 
+    def score_triples_batch(
+        self,
+        triples: torch.Tensor,
+        batch_size: int = 1024
+    ) -> torch.Tensor:
+        """Score a batch of triples efficiently.
+
+        Args:
+            triples: Tensor of shape (N, 3) with [head, relation, tail] rows
+            batch_size: Batch size for processing
+
+        Returns:
+            Tensor of scores for each triple
+        """
+        self.model.eval()
+        all_scores = []
+
+        with torch.no_grad():
+            for i in range(0, len(triples), batch_size):
+                batch = triples[i:i+batch_size].to(self.device)
+                heads = batch[:, 0]
+                relations = batch[:, 1]
+                tails = batch[:, 2]
+
+                # Create hr_batch for score_t
+                hr_batch = torch.stack([heads, relations], dim=1)  # (batch_size, 2)
+
+                # Get all tail scores for each (h, r) pair
+                # This returns shape (batch_size, num_entities)
+                scores_all_tails = self.model.score_t(hr_batch)
+
+                # Extract only the scores for the actual tails
+                batch_scores = scores_all_tails[torch.arange(len(tails)), tails]
+
+                if self.use_sigmoid:
+                    batch_scores = torch.sigmoid(batch_scores)
+
+                all_scores.append(batch_scores.cpu())
+
+        return torch.cat(all_scores)
+
     def score_dataset(
         self,
         test_triples: CoreTriplesFactory,
         output_path: Optional[str] = None,
-        include_labels: bool = True
+        include_labels: bool = True,
+        batch_size: int = 1024,
+        streaming: bool = False
     ) -> List[Dict[str, any]]:
         """Get ConvE scores for all test triples WITHOUT computing rankings.
 
         This is MUCH faster than evaluate_dataset() when you only need scores.
         Use this when you don't need rank, MRR, or hits@k metrics.
 
+        For very large datasets (millions of triples), use streaming=True to write
+        results directly to disk without storing in memory.
+
         Args:
             test_triples: Test triples factory
             output_path: Optional path to save scores (JSON and CSV)
             include_labels: If True, include entity/relation names in addition to IDs
+            batch_size: Batch size for efficient GPU scoring (default: 1024)
+            streaming: If True, stream results to disk (for large datasets)
 
         Returns:
             List of dictionaries with head, relation, tail, and score
+            (empty list if streaming=True)
         """
-        logger.info(f"Scoring {test_triples.num_triples} test triples (no ranking)...")
+        import time
+        num_triples = test_triples.num_triples
+        logger.info(f"Scoring {num_triples:,} test triples (no ranking)...")
+        logger.info(f"Batch size: {batch_size:,}, Streaming: {streaming}")
+
+        start_time = time.time()
 
         # Get ID-to-label mappings if labels requested
+        id_to_entity = None
+        id_to_relation = None
         if include_labels:
-            # Create reverse mappings: id -> label
             id_to_entity = {v: k for k, v in test_triples.entity_to_id.items()}
             id_to_relation = {v: k for k, v in test_triples.relation_to_id.items()}
 
-        # Score each triple
+        # Get triples tensor
+        triples_tensor = test_triples.mapped_triples
+
+        # For streaming mode, write directly to CSV
+        if streaming and output_path:
+            csv_path = output_path.replace('.json', '.csv')
+            logger.info(f"Streaming results to: {csv_path}")
+
+            # Write header
+            with open(csv_path, 'w') as f:
+                if include_labels:
+                    f.write("head_id,head_label,relation_id,relation_label,tail_id,tail_label,score\n")
+                else:
+                    f.write("head_id,relation_id,tail_id,score\n")
+
+            # Process in batches
+            num_batches = (num_triples + batch_size - 1) // batch_size
+            processed = 0
+
+            self.model.eval()
+            with torch.no_grad():
+                for batch_idx in range(num_batches):
+                    batch_start = batch_idx * batch_size
+                    batch_end = min(batch_start + batch_size, num_triples)
+                    batch_triples = triples_tensor[batch_start:batch_end].to(self.device)
+
+                    heads = batch_triples[:, 0]
+                    relations = batch_triples[:, 1]
+                    tails = batch_triples[:, 2]
+
+                    # Create hr_batch for score_t
+                    hr_batch = torch.stack([heads, relations], dim=1)
+
+                    # Get all tail scores
+                    scores_all_tails = self.model.score_t(hr_batch)
+
+                    # Extract scores for actual tails
+                    batch_scores = scores_all_tails[torch.arange(len(tails), device=self.device), tails]
+
+                    if self.use_sigmoid:
+                        batch_scores = torch.sigmoid(batch_scores)
+
+                    # Write batch to file
+                    with open(csv_path, 'a') as f:
+                        for i in range(len(batch_scores)):
+                            h = int(heads[i].item())
+                            r = int(relations[i].item())
+                            t = int(tails[i].item())
+                            s = float(batch_scores[i].item())
+
+                            if include_labels:
+                                h_label = id_to_entity.get(h, f'UNKNOWN_{h}')
+                                r_label = id_to_relation.get(r, f'UNKNOWN_{r}')
+                                t_label = id_to_entity.get(t, f'UNKNOWN_{t}')
+                                f.write(f"{h},{h_label},{r},{r_label},{t},{t_label},{s:.6f}\n")
+                            else:
+                                f.write(f"{h},{r},{t},{s:.6f}\n")
+
+                    processed += len(batch_scores)
+
+                    # Progress logging
+                    if (batch_idx + 1) % 100 == 0 or batch_idx == num_batches - 1:
+                        elapsed = time.time() - start_time
+                        rate = processed / elapsed
+                        eta_seconds = (num_triples - processed) / rate if rate > 0 else 0
+                        eta_mins = int(eta_seconds / 60)
+                        eta_secs = int(eta_seconds % 60)
+                        progress_pct = 100 * processed / num_triples
+
+                        logger.info(f"  Progress: {processed:,}/{num_triples:,} ({progress_pct:.1f}%) "
+                                   f"| Rate: {rate:.0f} triples/sec | ETA: {eta_mins}m {eta_secs}s")
+
+            elapsed = time.time() - start_time
+            logger.info(f"✓ Scored {num_triples:,} triples in {elapsed:.1f}s ({num_triples/elapsed:.0f} triples/sec)")
+            logger.info(f"✓ Results saved to: {csv_path}")
+
+            return []  # Empty list for streaming mode
+
+        # Non-streaming mode: use batch scoring and keep in memory
+        logger.info("Processing with batch scoring...")
+
+        # Score all triples in batches
+        all_scores = self.score_triples_batch(triples_tensor, batch_size=batch_size)
+
+        elapsed_scoring = time.time() - start_time
+        logger.info(f"Batch scoring completed in {elapsed_scoring:.1f}s")
+
+        # Build results list
+        logger.info("Building results...")
         results = []
-        for h, r, t in tqdm(test_triples.mapped_triples, desc="Scoring"):
-            h, r, t = int(h), int(r), int(t)
-            score = self.score_triple(h, r, t)
+        triples_np = triples_tensor.numpy()
+
+        for i in tqdm(range(num_triples), desc="Building results"):
+            h, r, t = int(triples_np[i, 0]), int(triples_np[i, 1]), int(triples_np[i, 2])
+            score = float(all_scores[i].item())
 
             result = {
                 'head_id': h,
@@ -213,7 +358,6 @@ class DetailedEvaluator:
                 'score': score
             }
 
-            # Add labels if requested
             if include_labels:
                 result['head_label'] = id_to_entity.get(h, f'UNKNOWN_{h}')
                 result['relation_label'] = id_to_relation.get(r, f'UNKNOWN_{r}')
@@ -221,7 +365,8 @@ class DetailedEvaluator:
 
             results.append(result)
 
-        logger.info(f"Scored {len(results)} triples")
+        elapsed_total = time.time() - start_time
+        logger.info(f"Scored {len(results):,} triples in {elapsed_total:.1f}s")
 
         # Save results if path provided
         if output_path:
