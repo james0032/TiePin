@@ -86,7 +86,7 @@ output_dropout: 0.3
 # ============================================================================
 
 # Number of training epochs
-num_epochs: 20
+num_epochs: 50
 
 # Batch size for training
 batch_size: 32768

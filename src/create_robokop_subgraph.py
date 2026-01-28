@@ -463,6 +463,18 @@ def keep_CGGD_alltreat(edge, typemap):
                 ("biolink:GeneOrGeneProduct", "biolink:DiseaseOrPhenotypicFeature")]
     return check_accepted(edge, typemap, accepted)
 
+def keep_CGGD_minus(edge, typemap):
+    # return True if you want to filter this edge out
+    # We want to keep edges between chemicals and genes, between genes and disease, and between chemicals and diseases
+    # Unfortunately this means that we need a type map... Dangit
+    if edge["predicate"] == "biolink:treats":
+        return False
+    accepted = [ #("biolink:ChemicalEntity", "biolink:DiseaseOrPhenotypicFeature"),
+                ("biolink:ChemicalEntity", "biolink:GeneOrGeneProduct"),
+                ("biolink:GeneOrGeneProduct", "biolink:GeneOrGeneProduct"),
+                ("biolink:GeneOrGeneProduct", "biolink:DiseaseOrPhenotypicFeature")]
+    return check_accepted(edge, typemap, accepted)
+
 def keep_CCGGDD_alltreat(edge, typemap):
     # return True if you want to filter this edge out
     # We want to keep edges between chemicals and genes, between genes and disease, and between chemicals and diseases
