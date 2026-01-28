@@ -557,6 +557,9 @@ def create_robokop_input(node_file="robokop/nodes.jsonl", edges_file="robokop/ed
     elif style == "CGGD_alltreat":
         remove_edge = keep_CGGD_alltreat
         logger.info("Using 'CGGD_alltreat' style: keeping CGGD edges plus all 'treats' relationships")
+    elif style == "CGGD_minus":
+        remove_edge = keep_CGGD_minus
+        logger.info("Using 'CGGD_minus' style: keeping CGGD edges without CD connection, plus all 'treats' relationships")   
     elif style == "CCGGDD_alltreat":
         remove_edge = keep_CCGGDD_alltreat
         logger.info("Using 'CCGGDD_alltreat' style: keeping CCGGDD edges plus all 'treats' relationships")   
