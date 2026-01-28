@@ -146,6 +146,22 @@ def main():
     df.to_csv(output_path, index=False)
     print(f"\nSaved to: {output_path}")
 
+    # Save triple format output (Drug_CURIE, predicate:38, Disease_CURIE)
+    # Filter out rows with "not exist" in either CURIE
+    valid_df = df[
+        (df["prefered_Drug_CURIE"] != "not exist") &
+        (df["prefered_Disease_CURIE"] != "not exist")
+    ]
+
+    # Create triple format: Drug_CURIE \t predicate:38 \t Disease_CURIE
+    triple_output_path = output_path.parent / (output_path.stem + "_triples.txt")
+    with open(triple_output_path, 'w') as f:
+        for _, row in valid_df.iterrows():
+            f.write(f"{row['prefered_Drug_CURIE']}\tpredicate:38\t{row['prefered_Disease_CURIE']}\n")
+
+    print(f"Saved triples to: {triple_output_path}")
+    print(f"  Valid triples (no 'not exist'): {len(valid_df):,}/{len(df):,}")
+
     # Print statistics
     drug_found = (df["prefered_Drug_CURIE"] != "not exist").sum()
     disease_found = (df["prefered_Disease_CURIE"] != "not exist").sum()
