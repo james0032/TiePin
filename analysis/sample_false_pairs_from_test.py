@@ -1,19 +1,20 @@
 """
-Sample is_treat=False pairs for drugs and diseases that appear in the 384 test triples.
+Sample is_treat=False pairs from the 750 test triples.
 
-For each drug in the 384 test pairs: randomly select 15 is_treat=False pairs
-For each disease in the 384 test pairs: randomly select 15 is_treat=False pairs
-
-Also combines the filtered score matrices with the 750 test triples and removes duplicates.
-
-This creates a balanced dataset for analysis with diverse coverage of drugs and diseases.
+Workflow:
+1. Combine filtered score matrices with the 750 test triples (remove duplicates)
+2. Separate into is_treat=True and is_treat=False
+3. For is_treat=True: only keep pairs that exist in test_triple_750_scores_compgcn.csv
+4. For is_treat=False: get unique disease list from test_triple_750_scores_compgcn.csv,
+   then for each disease sample 10 is_treat=False triples
+5. Combine positives + sampled negatives and save
 """
 
 import polars as pl
 from pathlib import Path
 import random
 
-SAMPLE_SIZE = 15
+SAMPLE_SIZE = 20
 
 
 def combine_compgcn_with_test(
@@ -84,87 +85,63 @@ def combine_conve_with_test(
     return combined
 
 
-def sample_false_pairs(
+def sample_and_filter(
     compgcn: pl.DataFrame,
     conve: pl.DataFrame,
-    test: pl.DataFrame
+    test_compgcn: pl.DataFrame
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
-    Sample is_treat=False pairs for drugs and diseases in the overlapping test pairs.
+    1. is_treat=True: keep only pairs in test_triple_750_scores_compgcn.csv
+    2. is_treat=False: for each unique disease in the 750 test triples,
+       sample 10 is_treat=False triples
     """
-    print("\n=== Sampling false pairs ===")
+    # Build test pairs lookup
+    test_pairs_df = test_compgcn.select([
+        pl.col("head").alias("drug"),
+        pl.col("tail").alias("disease"),
+    ]).unique()
 
-    # Get is_treat=True pairs from CompGCN
-    compgcn_treats = compgcn.filter(pl.col("is_treat") == True)
-    compgcn_treat_pairs = set(
-        zip(compgcn_treats["head"].to_list(), compgcn_treats["tail"].to_list())
+    test_diseases = test_compgcn["tail"].unique().to_list()
+
+    print("\n=== Filtering positives to 750 test triples ===")
+    print(f"  Unique test pairs: {len(test_pairs_df):,}")
+    print(f"  Unique test diseases: {len(test_diseases):,}")
+
+    # --- Separate positives and negatives ---
+    compgcn_pos = compgcn.filter(pl.col("is_treat") == True)
+    compgcn_neg = compgcn.filter(pl.col("is_treat") == False)
+    print(f"\n  CompGCN is_treat=True: {len(compgcn_pos):,}")
+    print(f"  CompGCN is_treat=False: {len(compgcn_neg):,}")
+
+    # --- Step 1: Filter positives to 750 test triples ---
+    compgcn_pos_filtered = compgcn_pos.join(
+        test_pairs_df,
+        left_on=["head", "tail"],
+        right_on=["drug", "disease"],
+        how="inner"
     )
+    print(f"  CompGCN is_treat=True after filter: {len(compgcn_pos_filtered):,}")
 
-    # Get test pairs
-    test_pairs = set(
-        zip(test["head_label"].to_list(), test["tail_label"].to_list())
-    )
-
-    # Find the overlapping pairs
-    overlap_pairs = compgcn_treat_pairs & test_pairs
-    print(f"is_treat pairs also in test triples: {len(overlap_pairs):,}")
-
-    # Get unique drugs and diseases from the overlapping pairs
-    overlap_drugs = set(p[0] for p in overlap_pairs)
-    overlap_diseases = set(p[1] for p in overlap_pairs)
-    print(f"  Unique drugs in overlap: {len(overlap_drugs):,}")
-    print(f"  Unique diseases in overlap: {len(overlap_diseases):,}")
-
-    # Get is_treat=False pairs from CompGCN
-    compgcn_false = compgcn.filter(pl.col("is_treat") == False)
-    print(f"\nis_treat=False rows in CompGCN: {len(compgcn_false):,}")
-
-    # Sample 15 false pairs for each drug
-    print(f"\nSampling {SAMPLE_SIZE} false pairs for each drug...")
-    drug_sampled_pairs = set()
-    for drug in overlap_drugs:
-        drug_false = compgcn_false.filter(pl.col("head") == drug)
-        pairs = list(zip(drug_false["head"].to_list(), drug_false["tail"].to_list()))
+    # --- Step 2: For each unique disease in test triples, sample 10 negatives ---
+    print(f"\nSampling {SAMPLE_SIZE} is_treat=False triples for each test disease...")
+    all_sampled_pairs = set()
+    for disease in test_diseases:
+        disease_neg = compgcn_neg.filter(pl.col("tail") == disease)
+        pairs = list(zip(disease_neg["head"].to_list(), disease_neg["tail"].to_list()))
         sample_size = min(SAMPLE_SIZE, len(pairs))
         if sample_size > 0:
             sampled = random.sample(pairs, sample_size)
-            drug_sampled_pairs.update(sampled)
+            all_sampled_pairs.update(sampled)
 
-    print(f"  Pairs sampled by drug: {len(drug_sampled_pairs):,}")
+    print(f"  Total unique sampled negative pairs: {len(all_sampled_pairs):,}")
 
-    # Sample 15 false pairs for each disease
-    print(f"\nSampling {SAMPLE_SIZE} false pairs for each disease...")
-    disease_sampled_pairs = set()
-    for disease in overlap_diseases:
-        disease_false = compgcn_false.filter(pl.col("tail") == disease)
-        pairs = list(zip(disease_false["head"].to_list(), disease_false["tail"].to_list()))
-        sample_size = min(SAMPLE_SIZE, len(pairs))
-        if sample_size > 0:
-            sampled = random.sample(pairs, sample_size)
-            disease_sampled_pairs.update(sampled)
+    # --- Build final pair list ---
+    pos_pairs = list(zip(compgcn_pos_filtered["head"].to_list(), compgcn_pos_filtered["tail"].to_list()))
+    pos_df = pl.DataFrame({"drug": [p[0] for p in pos_pairs], "disease": [p[1] for p in pos_pairs]})
+    neg_df = pl.DataFrame({"drug": [p[0] for p in all_sampled_pairs], "disease": [p[1] for p in all_sampled_pairs]})
+    all_pairs_df = pl.concat([pos_df, neg_df]).unique()
 
-    print(f"  Pairs sampled by disease: {len(disease_sampled_pairs):,}")
-
-    # Combine all sampled pairs (union to avoid duplicates)
-    all_sampled_pairs = drug_sampled_pairs | disease_sampled_pairs
-    print(f"\nTotal unique sampled false pairs: {len(all_sampled_pairs):,}")
-
-    # Create DataFrame with sampled pairs for filtering
-    sampled_df = pl.DataFrame({
-        "drug": [p[0] for p in all_sampled_pairs],
-        "disease": [p[1] for p in all_sampled_pairs]
-    })
-
-    # Also include the overlap pairs (is_treat=True)
-    overlap_df = pl.DataFrame({
-        "drug": [p[0] for p in overlap_pairs],
-        "disease": [p[1] for p in overlap_pairs]
-    })
-
-    # Combine overlap + sampled pairs
-    all_pairs_df = pl.concat([overlap_df, sampled_df]).unique()
-
-    # Filter CompGCN to get selected pairs
+    # --- Filter both CompGCN and ConvE to selected pairs ---
     compgcn_sampled = compgcn.join(
         all_pairs_df,
         left_on=["head", "tail"],
@@ -172,7 +149,6 @@ def sample_false_pairs(
         how="inner"
     ).sort(["head", "tail"])
 
-    # Filter ConvE to get the same pairs
     conve_sampled = conve.join(
         all_pairs_df,
         left_on=["head_label", "tail_label"],
@@ -195,22 +171,20 @@ def main():
     base_path = Path("/Users/jchung/Documents/RENCI/everycure/git/conve_pykeen/data/clean_baseline")
 
     # Input paths
-    compgcn_filtered_path = base_path / "scores_matrix_CompGCN_filtered.txt"
-    conve_filtered_path = base_path / "scores_matrix_ConvE_filtered.txt"
+    compgcn_filtered_path = base_path / "scores_matrix_CompGCN_with_is_treat.txt"
+    conve_filtered_path = base_path / "scores_matrix_ConvE_with_is_treat.txt"
     compgcn_test_path = base_path / "ConvE_top50_predict/test_triple_750_scores_compgcn.csv"
     conve_test_path = base_path / "ConvE_top50_predict/scores_test_ranked_750_ConvE.csv"
 
-    # Step 1: Combine filtered files with test triples
+    # Step 1: Combine filtered files with test triples (deduplicate)
     compgcn_combined = combine_compgcn_with_test(str(compgcn_filtered_path), str(compgcn_test_path))
     conve_combined = combine_conve_with_test(str(conve_filtered_path), str(conve_test_path))
 
-    # Load test triples for overlap calculation
-    test = pl.read_csv(str(conve_test_path))
+    # Step 2+3: Filter positives to test triples, sample negatives per test disease
+    test_compgcn = pl.read_csv(str(compgcn_test_path))
+    compgcn_sampled, conve_sampled = sample_and_filter(compgcn_combined, conve_combined, test_compgcn)
 
-    # Step 2: Sample false pairs
-    compgcn_sampled, conve_sampled = sample_false_pairs(compgcn_combined, conve_combined, test)
-
-    # Step 3: Save outputs
+    # Step 4: Save outputs
     print("\n=== Saving outputs ===")
 
     # Save combined (with test triples merged)

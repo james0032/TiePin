@@ -14,6 +14,7 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 @dataclass
@@ -229,6 +230,71 @@ def print_confusion_matrix(metrics: BinaryMetrics):
     print(f"  FNR:                {metrics.false_negative_rate:.4f}")
 
 
+def plot_roc_curve(
+    conve_scores: list[float],
+    conve_y_true: list[bool],
+    compgcn_scores: list[float],
+    compgcn_y_true: list[bool],
+    output_path: Path
+):
+    """Plot ROC curves for both models with AUC. ROC is threshold-independent
+    and not affected by class imbalance."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    for scores, y_true, name, color in [
+        (conve_scores, conve_y_true, "ConvE", "steelblue"),
+        (compgcn_scores, compgcn_y_true, "CompGCN", "darkorange"),
+    ]:
+        scores_arr = np.array(scores)
+        y_true_arr = np.array(y_true)
+
+        # Sort by score descending to sweep thresholds
+        sorted_indices = np.argsort(-scores_arr)
+        sorted_labels = y_true_arr[sorted_indices]
+        sorted_scores = scores_arr[sorted_indices]
+
+        # Compute TPR and FPR at each unique threshold
+        total_pos = np.sum(y_true_arr)
+        total_neg = len(y_true_arr) - total_pos
+
+        tprs = [0.0]
+        fprs = [0.0]
+        tp = 0
+        fp = 0
+
+        for i in range(len(sorted_labels)):
+            if sorted_labels[i]:
+                tp += 1
+            else:
+                fp += 1
+            # Only record a point when score changes or at the end
+            if i == len(sorted_labels) - 1 or sorted_scores[i] != sorted_scores[i + 1]:
+                tprs.append(tp / total_pos if total_pos > 0 else 0.0)
+                fprs.append(fp / total_neg if total_neg > 0 else 0.0)
+
+        # Compute AUC using trapezoidal rule
+        auc = np.trapz(tprs, fprs)
+
+        ax.plot(fprs, tprs, linewidth=2, color=color,
+                label=f"{name} (AUC = {auc:.4f})")
+
+    # Random classifier baseline
+    ax.plot([0, 1], [0, 1], linestyle="--", linewidth=1, color="gray", label="Random")
+
+    ax.set_xlabel("False Positive Rate", fontsize=12)
+    ax.set_ylabel("True Positive Rate", fontsize=12)
+    ax.set_title("ROC Curve", fontsize=14)
+    ax.set_xlim(0, 1.0)
+    ax.set_ylim(0, 1.05)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=11)
+
+    plt.tight_layout()
+    fig.savefig(str(output_path), dpi=150, bbox_inches="tight")
+    print(f"\nROC curve saved to: {output_path}")
+    plt.show()
+
+
 def main():
     base_path = Path("/Users/jchung/Documents/RENCI/everycure/git/conve_pykeen/data/clean_baseline")
 
@@ -305,6 +371,15 @@ def main():
 
     for metric in ["accuracy", "precision", "recall", "specificity", "f1_score", "balanced_accuracy", "mcc"]:
         print(f"{metric:<25} {conve_opt[metric]:>12.4f} {compgcn_opt[metric]:>12.4f}")
+
+    # Plot ROC curve (handles sample imbalance)
+    plot_roc_curve(
+        conve_scores=conve_scores,
+        conve_y_true=conve_y_true,
+        compgcn_scores=compgcn_scores,
+        compgcn_y_true=compgcn_y_true,
+        output_path=base_path / "roc_curve.png"
+    )
 
     print("\nDone!")
 

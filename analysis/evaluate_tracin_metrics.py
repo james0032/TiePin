@@ -1,8 +1,8 @@
 """
-Evaluate TracIn scores for identifying In_path edges from DrugMechDB.
+Evaluate TracIn scores for identifying On_specific_path edges from DrugMechDB.
 
 This script calculates Mean Reciprocal Rank (MRR) and Mean Average Precision (MAP)
-to assess how well TracIn scores rank ground truth (In_path=1) training edges
+to assess how well TracIn scores rank ground truth (On_specific_path=1) training edges
 for each test triple.
 
 Metrics:
@@ -114,7 +114,7 @@ def calculate_map(all_relevant_positions: List[List[int]], all_total_items: List
     return np.mean(aps)
 
 
-def analyze_tracin_file(csv_path: Path, in_path_column: str = 'In_path') -> Dict[str, float]:
+def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path') -> Dict[str, float]:
     """
     Analyze a single TracIn CSV file and calculate MRR and MAP.
 
@@ -123,7 +123,7 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'In_path') -> Dict
     csv_path : Path
         Path to the TracIn CSV file with ground truth annotations
     in_path_column : str
-        Name of the column indicating ground truth (default: 'In_path')
+        Name of the column indicating ground truth (default: 'On_specific_path')
 
     Returns
     -------
@@ -142,8 +142,10 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'In_path') -> Dict
         logger.warning(f"Missing columns in {csv_path.name}: {missing_cols}")
         # Try alternate column names
         if in_path_column not in df.columns:
-            if 'in_path' in df.columns:
-                in_path_column = 'in_path'
+            if 'On_specific_path' in df.columns:
+                in_path_column = 'On_specific_path'
+            elif 'In_path' in df.columns:
+                in_path_column = 'In_path'
             elif 'IsGroundTruth' in df.columns:
                 in_path_column = 'IsGroundTruth'
             else:
@@ -1063,8 +1065,8 @@ def main():
     parser.add_argument(
         '--in-path-column',
         type=str,
-        default='In_path',
-        help='Name of the column indicating ground truth (default: In_path)'
+        default='On_specific_path',
+        help='Name of the column indicating ground truth (default: On_specific_path)'
     )
     parser.add_argument(
         '--distribution-tests',
