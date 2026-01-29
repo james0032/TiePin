@@ -691,7 +691,7 @@ Examples:
         '--style',
         type=str,
         default='CGGD_alltreat',
-        choices=['original', 'CD', 'CCGGDD', 'CGGD', 'rCD', 'keepall', 'CGGD_alltreat', 'CCGGDD_alltreat', 'clean_baseline'],
+        choices=['original', 'CD', 'CCGGDD', 'CGGD', 'rCD', 'keepall', 'CGGD_alltreat', 'CCGGDD_alltreat', 'clean_baseline', 'CGGD_minus'],
         help='Filtering style to apply (default: CGGD_alltreat)'
     )
 

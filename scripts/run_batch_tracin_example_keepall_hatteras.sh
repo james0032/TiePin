@@ -5,19 +5,19 @@
 # and TracIn analysis, generating CSV outputs with influence scores.
 
 # Configuration - UPDATE THESE PATHS
-MODEL_PATH="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/models/conve/checkpoints/checkpoint_epoch_0000050.pt"
-TRAIN_FILE="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/train.txt"
-ENTITY_TO_ID="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/processed/node_dict.txt"
-RELATION_TO_ID="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/processed/rel_dict.txt"
-EDGE_MAP="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/edge_map.json"
-NODE_NAME_DICT="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/processed/node_name_dict.txt"
-GRAPH_CACHE="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/train_graph_cache.pkl"
+MODEL_PATH="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/models/conve/checkpoints/checkpoint_epoch_0000050.pt"
+TRAIN_FILE="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/train.txt"
+ENTITY_TO_ID="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/processed/node_dict.txt"
+RELATION_TO_ID="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/processed/rel_dict.txt"
+EDGE_MAP="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/edge_map.json"
+NODE_NAME_DICT="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/processed/node_name_dict.txt"
+GRAPH_CACHE="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/train_graph_cache.pkl"
 
 # Test triples file
-TEST_TRIPLES="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/EC_MOA_pairs/ec_moa_preferred_triples.txt"
+TEST_TRIPLES="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/test.txt"
 
 # Output directory
-OUTPUT_DIR="/projects/aixb/jchung/everycure/influence_estimate/robokop/clean_baseline/results/batch_tracin_ecmoa"
+OUTPUT_DIR="/projects/aixb/jchung/everycure/influence_estimate/robokop/keepall/results/batch_tracin_750"
 
 # Run batch TracIn analysis
 # Change to the parent directory (where batch_tracin_with_filtering.py is located)
