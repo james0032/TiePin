@@ -216,6 +216,73 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
     return results
 
 
+def extract_on_specific_path_edges(csv_path: Path, in_path_column: str = 'On_specific_path') -> pd.DataFrame:
+    """
+    Extract all On_specific_path edges for each test triple from a TracIn CSV file.
+
+    Parameters
+    ----------
+    csv_path : Path
+        Path to the TracIn CSV file with ground truth annotations
+    in_path_column : str
+        Name of the column indicating ground truth (default: 'On_specific_path')
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns: File, TestHead, TestRel, TestTail,
+        TrainHead, TrainRel_label, TrainTail, TracInScore, Rank
+    """
+    df = pd.read_csv(csv_path)
+
+    # Resolve column name with fallback
+    if in_path_column not in df.columns:
+        if 'On_specific_path' in df.columns:
+            in_path_column = 'On_specific_path'
+        elif 'In_path' in df.columns:
+            in_path_column = 'In_path'
+        elif 'IsGroundTruth' in df.columns:
+            in_path_column = 'IsGroundTruth'
+        else:
+            logger.warning(f"No ground truth column found in {csv_path.name}, skipping")
+            return pd.DataFrame()
+
+    # Build test triple key
+    df['test_triple'] = (df['TestHead'].astype(str) + '|' +
+                         df['TestRel'].astype(str) + '|' +
+                         df['TestTail'].astype(str))
+
+    rows = []
+    for test_triple, group in df.groupby('test_triple'):
+        # Sort by TracInScore descending
+        sorted_group = group.sort_values('TracInScore', ascending=False).reset_index(drop=True)
+
+        # Filter to On_specific_path == 1
+        on_path = sorted_group[sorted_group[in_path_column] == 1]
+
+        if on_path.empty:
+            continue
+
+        for idx, row in on_path.iterrows():
+            # Rank is the 1-based position in the sorted list
+            rank = sorted_group.index.get_loc(idx) + 1 if idx in sorted_group.index else None
+            train_cols = {}
+            train_cols['File'] = csv_path.name
+            train_cols['TestHead'] = row['TestHead']
+            train_cols['TestRel'] = row['TestRel']
+            train_cols['TestTail'] = row['TestTail']
+            # Include training edge columns if available
+            for col in ['TrainHead', 'TrainRel_label', 'TrainTail',
+                        'TrainHead_name', 'TrainTail_name']:
+                if col in row.index:
+                    train_cols[col] = row[col]
+            train_cols['TracInScore'] = row['TracInScore']
+            train_cols['Rank'] = rank
+            rows.append(train_cols)
+
+    return pd.DataFrame(rows)
+
+
 def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
                       output_path: Path = None,
                       include_distribution_tests: bool = False,
@@ -267,12 +334,18 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
     basic_results = []
     distribution_results = []
     permutation_results = []
+    on_path_edges_dfs = []
 
     for csv_file in sorted(csv_files):
         try:
             # Basic metrics (MRR, MAP, etc.)
             result = analyze_tracin_file(csv_file)
             basic_results.append(result)
+
+            # Extract On_specific_path edges for each test triple
+            edges_df = extract_on_specific_path_edges(csv_file)
+            if not edges_df.empty:
+                on_path_edges_dfs.append(edges_df)
 
             # Distribution tests
             if include_distribution_tests:
@@ -314,6 +387,13 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
         basic_df = basic_df.sort_values('mrr', ascending=False).reset_index(drop=True)
     results_dict['basic_metrics'] = basic_df
 
+    # On_specific_path edges
+    if on_path_edges_dfs:
+        on_path_edges_df = pd.concat(on_path_edges_dfs, ignore_index=True)
+    else:
+        on_path_edges_df = pd.DataFrame()
+    results_dict['on_specific_path_edges'] = on_path_edges_df
+
     # Distribution tests
     if include_distribution_tests and distribution_results:
         dist_df = pd.DataFrame(distribution_results)
@@ -333,6 +413,12 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
         # Save basic metrics
         basic_df.to_csv(output_path, index=False)
         logger.info(f"Basic metrics saved to {output_path}")
+
+        # Save On_specific_path edges
+        if not on_path_edges_df.empty:
+            edges_output = output_path.parent / f"{output_path.stem}_on_specific_path_edges.csv"
+            on_path_edges_df.to_csv(edges_output, index=False)
+            logger.info(f"On_specific_path edges saved to {edges_output}")
 
         # Save distribution tests
         if include_distribution_tests and not results_dict['distribution_tests'].empty:
@@ -1118,6 +1204,22 @@ def main():
 
         # Print summary statistics
         print_summary_statistics(results_dict['basic_metrics'])
+
+    # Print On_specific_path edges summary
+    if not results_dict['on_specific_path_edges'].empty:
+        edges_df = results_dict['on_specific_path_edges']
+        print("\n" + "="*80)
+        print("ON_SPECIFIC_PATH EDGES SUMMARY")
+        print("="*80)
+        n_files = edges_df['File'].nunique()
+        n_triples = edges_df.groupby(['File', 'TestHead', 'TestRel', 'TestTail']).ngroups
+        print(f"  Total On_specific_path edges: {len(edges_df)}")
+        print(f"  Across {n_files} files, {n_triples} test triples")
+        print(f"  Avg edges per test triple: {len(edges_df) / n_triples:.2f}")
+        print(f"  Avg rank of On_specific_path edges: {edges_df['Rank'].mean():.2f}")
+        print(f"  Median rank: {edges_df['Rank'].median():.1f}")
+        edges_output = args.output.parent / f"{args.output.stem}_on_specific_path_edges.csv"
+        print(f"  Saved to: {edges_output}")
 
         # Print top performers
         print("\n" + "="*80)
