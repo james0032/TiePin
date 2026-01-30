@@ -8,6 +8,7 @@ polars
 # For evaluation and analysis
 scikit-learn>=1.0.0
 scipy>=1.7.0
+diptest>=0.6.0
 
 # Progress bars and logging
 tqdm>=4.62.0

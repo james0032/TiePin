@@ -26,6 +26,7 @@ from scipy.stats import (
     levene,
     shapiro
 )
+import diptest
 
 
 logging.basicConfig(
@@ -254,9 +255,13 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
         std_score = np.std(all_scores, ddof=1) if len(all_scores) > 1 else 0.0
         std_threshold = mean_score + 3 * std_score
         n_above_3std = int(np.sum(all_scores > std_threshold))
+        # Hartigan's Dip Test for bimodality
+        dip_stat, dip_pval = diptest.diptest(all_scores)
     else:
         n_above_3mad = 0
         n_above_3std = 0
+        dip_stat = None
+        dip_pval = None
 
     # Extract test triple labels from first row for identification
     first_row = df.iloc[0]
@@ -281,7 +286,8 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
         'avg_rank_first_relevant': avg_rank,
         'median_rank_first_relevant': median_rank,
         'n_above_3mad': n_above_3mad,
-        'n_above_3std': n_above_3std
+        'n_above_3std': n_above_3std,
+        'dip_pvalue': dip_pval
     }
 
     # Look up link prediction score if provided
