@@ -114,7 +114,40 @@ def calculate_map(all_relevant_positions: List[List[int]], all_total_items: List
     return np.mean(aps)
 
 
-def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path') -> Dict[str, float]:
+def load_prediction_scores(scores_path: Path) -> Dict[tuple, float]:
+    """
+    Load link prediction scores from a CSV file into a lookup dictionary.
+
+    Parameters
+    ----------
+    scores_path : Path
+        Path to prediction scores CSV with columns:
+        head_label, relation_label, tail_label, score
+
+    Returns
+    -------
+    Dict[tuple, float]
+        Dictionary mapping (head_label, relation_label, tail_label) to score
+    """
+    logger.info(f"Loading prediction scores from {scores_path}...")
+    scores_df = pd.read_csv(scores_path)
+
+    required = ['head_label', 'relation_label', 'tail_label', 'score']
+    missing = [c for c in required if c not in scores_df.columns]
+    if missing:
+        raise ValueError(f"Prediction scores CSV missing columns: {missing}")
+
+    lookup = {}
+    for _, row in scores_df.iterrows():
+        key = (str(row['head_label']), str(row['relation_label']), str(row['tail_label']))
+        lookup[key] = float(row['score'])
+
+    logger.info(f"Loaded {len(lookup)} prediction scores")
+    return lookup
+
+
+def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path',
+                        prediction_scores: Dict[tuple, float] = None) -> Dict[str, float]:
     """
     Analyze a single TracIn CSV file and calculate MRR and MAP.
 
@@ -124,6 +157,10 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
         Path to the TracIn CSV file with ground truth annotations
     in_path_column : str
         Name of the column indicating ground truth (default: 'On_specific_path')
+    prediction_scores : Dict[tuple, float], optional
+        Lookup dictionary mapping (head_label, relation_label, tail_label) to
+        link prediction score (e.g. from ConvE). If provided, the score is
+        added to the results.
 
     Returns
     -------
@@ -163,9 +200,11 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
     total_test_triples = 0
     triples_with_ground_truth = 0
     total_ground_truth_edges = 0
+    total_training_edges = 0
 
     for test_triple, group in df.groupby(test_triple_col):
         total_test_triples += 1
+        total_training_edges += len(group)
 
         # Sort by TracInScore in descending order (higher score = more influential)
         sorted_group = group.sort_values('TracInScore', ascending=False).reset_index(drop=True)
@@ -194,24 +233,63 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
 
     # Calculate additional statistics
     avg_ground_truth_per_triple = total_ground_truth_edges / total_test_triples if total_test_triples > 0 else 0
+    avg_training_edges_per_triple = total_training_edges / total_test_triples if total_test_triples > 0 else 0
     coverage = triples_with_ground_truth / total_test_triples if total_test_triples > 0 else 0
 
     # Calculate average rank of ground truth edges
     avg_rank = np.mean(mrr_ranks) if mrr_ranks else 0
     median_rank = np.median(mrr_ranks) if mrr_ranks else 0
 
+    # Count outlier training edges by TracIn score
+    all_scores = df['TracInScore'].dropna().values
+    if len(all_scores) > 0:
+        # MAD-based: edges with score > median + 3 * MAD
+        median_score = np.median(all_scores)
+        mad = np.median(np.abs(all_scores - median_score))
+        mad_threshold = median_score + 3 * mad
+        n_above_3mad = int(np.sum(all_scores > mad_threshold))
+
+        # Std-based: edges with score > mean + 3 * std
+        mean_score = np.mean(all_scores)
+        std_score = np.std(all_scores, ddof=1) if len(all_scores) > 1 else 0.0
+        std_threshold = mean_score + 3 * std_score
+        n_above_3std = int(np.sum(all_scores > std_threshold))
+    else:
+        n_above_3mad = 0
+        n_above_3std = 0
+
+    # Extract test triple labels from first row for identification
+    first_row = df.iloc[0]
+    test_head_label = first_row.get('TestHead_label', first_row.get('TestHead', ''))
+    test_rel_label = first_row.get('TestRel_label', first_row.get('TestRel', ''))
+    test_tail_label = first_row.get('TestTail_label', first_row.get('TestTail', ''))
+
     results = {
         'file': csv_path.name,
+        'test_head': str(test_head_label),
+        'test_rel': str(test_rel_label),
+        'test_tail': str(test_tail_label),
         'mrr': mrr,
         'map': map_score,
         'total_test_triples': total_test_triples,
         'triples_with_ground_truth': triples_with_ground_truth,
+        'total_training_edges': total_training_edges,
         'total_ground_truth_edges': total_ground_truth_edges,
+        'avg_training_edges_per_triple': avg_training_edges_per_triple,
         'avg_ground_truth_per_triple': avg_ground_truth_per_triple,
         'coverage': coverage,
         'avg_rank_first_relevant': avg_rank,
-        'median_rank_first_relevant': median_rank
+        'median_rank_first_relevant': median_rank,
+        'n_above_3mad': n_above_3mad,
+        'n_above_3std': n_above_3std
     }
+
+    # Look up link prediction score if provided
+    if prediction_scores is not None:
+        key = (str(test_head_label), str(test_rel_label), str(test_tail_label))
+        results['prediction_score'] = prediction_scores.get(key, None)
+        if results['prediction_score'] is None:
+            logger.warning(f"No prediction score found for {key} in {csv_path.name}")
 
     return results
 
@@ -287,7 +365,8 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
                       output_path: Path = None,
                       include_distribution_tests: bool = False,
                       include_permutation_tests: bool = False,
-                      n_permutations: int = 1000) -> Dict[str, pd.DataFrame]:
+                      n_permutations: int = 1000,
+                      prediction_scores: Dict[tuple, float] = None) -> Dict[str, pd.DataFrame]:
     """
     Analyze all TracIn files matching the pattern in the input directory.
 
@@ -305,6 +384,9 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
         Whether to include permutation tests (default: False)
     n_permutations : int
         Number of permutations for permutation tests (default: 1000)
+    prediction_scores : Dict[tuple, float], optional
+        Lookup dictionary mapping (head_label, relation_label, tail_label) to
+        link prediction score
 
     Returns
     -------
@@ -339,7 +421,7 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
     for csv_file in sorted(csv_files):
         try:
             # Basic metrics (MRR, MAP, etc.)
-            result = analyze_tracin_file(csv_file)
+            result = analyze_tracin_file(csv_file, prediction_scores=prediction_scores)
             basic_results.append(result)
 
             # Extract On_specific_path edges for each test triple
@@ -1171,6 +1253,14 @@ def main():
         help='Number of permutations for permutation tests (default: 1000)'
     )
     parser.add_argument(
+        '--prediction-scores',
+        type=Path,
+        default=None,
+        help='Path to link prediction scores CSV (e.g. scores_test.csv) with columns: '
+             'head_label, relation_label, tail_label, score. '
+             'Used to add a prediction_score column to the evaluation results.'
+    )
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
@@ -1185,6 +1275,11 @@ def main():
     if args.output is None:
         args.output = args.input_dir / 'tracin_evaluation_results.csv'
 
+    # Load prediction scores if provided
+    pred_scores = None
+    if args.prediction_scores is not None:
+        pred_scores = load_prediction_scores(args.prediction_scores)
+
     # Analyze all files
     results_dict = analyze_all_files(
         args.input_dir,
@@ -1192,7 +1287,8 @@ def main():
         args.output,
         include_distribution_tests=args.distribution_tests,
         include_permutation_tests=args.permutation_tests,
-        n_permutations=args.n_permutations
+        n_permutations=args.n_permutations,
+        prediction_scores=pred_scores
     )
 
     # Print basic metrics results
