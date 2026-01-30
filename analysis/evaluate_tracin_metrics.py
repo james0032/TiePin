@@ -255,13 +255,24 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
         std_score = np.std(all_scores, ddof=1) if len(all_scores) > 1 else 0.0
         std_threshold = mean_score + 3 * std_score
         n_above_3std = int(np.sum(all_scores > std_threshold))
-        # Hartigan's Dip Test for bimodality
+        # Hartigan's Dip Test for bimodality (full distribution)
         dip_stat, dip_pval = diptest.diptest(all_scores)
+
+        # Right-tail dip test: test only scores above the median
+        # This detects a secondary hump on the high-score end
+        right_tail = all_scores[all_scores > median_score]
+        if len(right_tail) >= 10:
+            right_dip_stat, right_dip_pval = diptest.diptest(right_tail)
+        else:
+            right_dip_stat = None
+            right_dip_pval = None
     else:
         n_above_3mad = 0
         n_above_3std = 0
         dip_stat = None
         dip_pval = None
+        right_dip_stat = None
+        right_dip_pval = None
 
     # Extract test triple labels from first row for identification
     first_row = df.iloc[0]
@@ -287,7 +298,8 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
         'median_rank_first_relevant': median_rank,
         'n_above_3mad': n_above_3mad,
         'n_above_3std': n_above_3std,
-        'dip_pvalue': dip_pval
+        'dip_pvalue': dip_pval,
+        'right_dip_pvalue': right_dip_pval
     }
 
     # Look up link prediction score if provided
