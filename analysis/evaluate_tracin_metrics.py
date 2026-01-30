@@ -115,20 +115,25 @@ def calculate_map(all_relevant_positions: List[List[int]], all_total_items: List
     return np.mean(aps)
 
 
-def load_prediction_scores(scores_path: Path) -> Dict[tuple, float]:
+def load_prediction_scores(scores_path: Path) -> Dict[str, Dict[tuple, float]]:
     """
-    Load link prediction scores from a CSV file into a lookup dictionary.
+    Load link prediction scores from a CSV file into lookup dictionaries.
+
+    Builds two lookups for flexible matching:
+    - 'by_label': keyed by (head_label, relation_label, tail_label) — CURIE identifiers
+    - 'by_name': keyed by (head_name, relation_label, tail_name) — human-readable names
 
     Parameters
     ----------
     scores_path : Path
         Path to prediction scores CSV with columns:
         head_label, relation_label, tail_label, score
+        Optionally: head_name, tail_name
 
     Returns
     -------
-    Dict[tuple, float]
-        Dictionary mapping (head_label, relation_label, tail_label) to score
+    Dict[str, Dict[tuple, float]]
+        Dictionary with 'by_label' and 'by_name' lookup dictionaries
     """
     logger.info(f"Loading prediction scores from {scores_path}...")
     scores_df = pd.read_csv(scores_path)
@@ -138,17 +143,24 @@ def load_prediction_scores(scores_path: Path) -> Dict[tuple, float]:
     if missing:
         raise ValueError(f"Prediction scores CSV missing columns: {missing}")
 
-    lookup = {}
-    for _, row in scores_df.iterrows():
-        key = (str(row['head_label']), str(row['relation_label']), str(row['tail_label']))
-        lookup[key] = float(row['score'])
+    by_label = {}
+    by_name = {}
+    has_names = 'head_name' in scores_df.columns and 'tail_name' in scores_df.columns
 
-    logger.info(f"Loaded {len(lookup)} prediction scores")
-    return lookup
+    for _, row in scores_df.iterrows():
+        score = float(row['score'])
+        label_key = (str(row['head_label']), str(row['relation_label']), str(row['tail_label']))
+        by_label[label_key] = score
+        if has_names:
+            name_key = (str(row['head_name']), str(row['relation_label']), str(row['tail_name']))
+            by_name[name_key] = score
+
+    logger.info(f"Loaded {len(by_label)} prediction scores (by_label: {len(by_label)}, by_name: {len(by_name)})")
+    return {'by_label': by_label, 'by_name': by_name}
 
 
 def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path',
-                        prediction_scores: Dict[tuple, float] = None) -> Dict[str, float]:
+                        prediction_scores: Dict[str, Dict[tuple, float]] = None) -> Dict[str, float]:
     """
     Analyze a single TracIn CSV file and calculate MRR and MAP.
 
@@ -158,10 +170,9 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
         Path to the TracIn CSV file with ground truth annotations
     in_path_column : str
         Name of the column indicating ground truth (default: 'On_specific_path')
-    prediction_scores : Dict[tuple, float], optional
-        Lookup dictionary mapping (head_label, relation_label, tail_label) to
-        link prediction score (e.g. from ConvE). If provided, the score is
-        added to the results.
+    prediction_scores : Dict[str, Dict[tuple, float]], optional
+        Lookup dictionaries from load_prediction_scores() with 'by_label' and
+        'by_name' keys. Used to add a prediction_score column to the results.
 
     Returns
     -------
@@ -304,10 +315,21 @@ def analyze_tracin_file(csv_path: Path, in_path_column: str = 'On_specific_path'
 
     # Look up link prediction score if provided
     if prediction_scores is not None:
-        key = (str(test_head_label), str(test_rel_label), str(test_tail_label))
-        results['prediction_score'] = prediction_scores.get(key, None)
-        if results['prediction_score'] is None:
-            logger.warning(f"No prediction score found for {key} in {csv_path.name}")
+        score = None
+        # Try matching by CURIE label first (TestHead = CHEBI:xxx, TestTail = MONDO:xxx)
+        test_head_curie = str(first_row.get('TestHead', ''))
+        test_rel_curie = str(first_row.get('TestRel', ''))
+        test_tail_curie = str(first_row.get('TestTail', ''))
+        if prediction_scores.get('by_label'):
+            label_key = (test_head_curie, test_rel_curie, test_tail_curie)
+            score = prediction_scores['by_label'].get(label_key, None)
+        # Fall back to matching by name (TestHead_label = name, TestTail_label = name)
+        if score is None and prediction_scores.get('by_name'):
+            name_key = (str(test_head_label), str(test_rel_label), str(test_tail_label))
+            score = prediction_scores['by_name'].get(name_key, None)
+        results['prediction_score'] = score
+        if score is None:
+            logger.warning(f"No prediction score found for head={test_head_curie}, rel={test_rel_curie}, tail={test_tail_curie} in {csv_path.name}")
 
     return results
 
@@ -384,7 +406,7 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
                       include_distribution_tests: bool = False,
                       include_permutation_tests: bool = False,
                       n_permutations: int = 1000,
-                      prediction_scores: Dict[tuple, float] = None) -> Dict[str, pd.DataFrame]:
+                      prediction_scores: Dict[str, Dict[tuple, float]] = None) -> Dict[str, pd.DataFrame]:
     """
     Analyze all TracIn files matching the pattern in the input directory.
 
@@ -402,9 +424,9 @@ def analyze_all_files(input_dir: Path, pattern: str = "*_with_gt.csv",
         Whether to include permutation tests (default: False)
     n_permutations : int
         Number of permutations for permutation tests (default: 1000)
-    prediction_scores : Dict[tuple, float], optional
-        Lookup dictionary mapping (head_label, relation_label, tail_label) to
-        link prediction score
+    prediction_scores : Dict[str, Dict[tuple, float]], optional
+        Lookup dictionaries from load_prediction_scores() with 'by_label' and
+        'by_name' keys for matching prediction scores to test triples
 
     Returns
     -------
