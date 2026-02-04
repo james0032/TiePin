@@ -16,6 +16,7 @@ tqdm>=4.62.0
 # Data handling
 click>=8.0.0
 jsonlines
+requests>=2.28.0
 
 # Visualization
 matplotlib>=3.3.0

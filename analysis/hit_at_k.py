@@ -121,7 +121,7 @@ def main():
     fig, ax = plt.subplots(figsize=(8, 5))
 
     ax.plot(ks, conve_hits, linewidth=2, color="steelblue", label="ConvE")
-    ax.plot(ks, compgcn_hits, linewidth=2, color="darkorange", label="CompGCN")
+    ax.plot(ks, compgcn_hits, linewidth=2, color="darkorange", label="CompGCN+ConvE")
 
     ax.set_xlabel("K", fontsize=12)
     ax.set_ylabel("Hit@K", fontsize=12)
