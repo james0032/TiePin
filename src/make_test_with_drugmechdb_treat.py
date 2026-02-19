@@ -514,6 +514,29 @@ def main():
                 else:
                     logger.info(f"    NOT found in rotorobo.txt")
 
+        # Remove edges from train_candidates whose (head, tail) pair matches
+        # any test edge pair, regardless of predicate. This prevents data leakage
+        # where training edges connect the same drug-disease pairs as the test set.
+        test_pairs = set((s, o) for s, _, o in test_edges)
+        logger.info(f"Removing train edges matching {len(test_pairs)} test (head, tail) pairs (any predicate)")
+
+        train_candidates_filtered = []
+        pair_removed_count = 0
+        pair_removed_predicates = set()
+        for edge in train_candidates:
+            if (edge[0], edge[2]) in test_pairs:
+                pair_removed_count += 1
+                pair_removed_predicates.add(edge[1])
+            else:
+                train_candidates_filtered.append(edge)
+
+        logger.info(f"Removed {pair_removed_count} additional edges sharing (head, tail) with test pairs")
+        if pair_removed_predicates:
+            logger.info(f"  Predicates of removed edges: {pair_removed_predicates}")
+        logger.info(f"Train candidates after pair filtering: {len(train_candidates_filtered)} edges")
+
+        train_candidates = train_candidates_filtered
+
         # Write output files
         test_output = os.path.join(output_dir, 'test.txt')
         train_candidates_output = os.path.join(output_dir, 'train_candidates.txt')
@@ -531,6 +554,8 @@ def main():
             'test_percentage': args.test_pct * 100,
             'actual_test_percentage': len(test_edges) / len(unique_filtered_edges) * 100,
             'test_edges_removed_from_rotorobo': removed_count,
+            'test_pair_edges_removed': pair_removed_count,
+            'test_pair_removed_predicates': sorted(pair_removed_predicates),
             'train_candidate_edges': len(train_candidates),
             'remaining_filtered_edges': len(remaining_filtered_edges),
             'config': {
