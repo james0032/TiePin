@@ -99,7 +99,30 @@ def create_train_candidates(
     logger.info(f"  Test triples: {len(test_triples):,}")
     logger.info(f"  Test triples in subgraph: {len(test_in_subgraph):,}")
     logger.info(f"  Removed from subgraph: {removed_count:,}")
-    logger.info(f"  Train candidates: {len(train_candidates):,}")
+    logger.info(f"  Train candidates (after exact removal): {len(train_candidates):,}")
+
+    # Remove edges whose (head, tail) pair matches any test pair, regardless of predicate.
+    # This prevents data leakage where training edges connect the same entity pairs as test.
+    logger.info(f"\nStep 3b: Removing edges matching test (head, tail) pairs (any predicate)")
+    test_pairs = set((h, t) for h, _, t in test_triples)
+    logger.info(f"  Unique test (head, tail) pairs: {len(test_pairs):,}")
+
+    pair_removed_count = 0
+    pair_removed_predicates = set()
+    train_candidates_filtered = set()
+    for head, relation, tail in train_candidates:
+        if (head, tail) in test_pairs:
+            pair_removed_count += 1
+            pair_removed_predicates.add(relation)
+        else:
+            train_candidates_filtered.add((head, relation, tail))
+
+    train_candidates = train_candidates_filtered
+
+    logger.info(f"  Removed {pair_removed_count:,} additional edges sharing (head, tail) with test pairs")
+    if pair_removed_predicates:
+        logger.info(f"  Predicates of removed edges: {sorted(pair_removed_predicates)}")
+    logger.info(f"  Train candidates (after pair filtering): {len(train_candidates):,}")
 
     # Write train_candidates to file
     logger.info(f"\nStep 4: Writing train_candidates to {output_path}")
@@ -116,9 +139,11 @@ def create_train_candidates(
     logger.info("\n" + "=" * 80)
     logger.info("Summary Statistics")
     logger.info("=" * 80)
-    logger.info(f"Input subgraph:        {initial_count:,} triples")
-    logger.info(f"Fixed test set:        {len(test_triples):,} triples")
-    logger.info(f"Test triples removed:  {removed_count:,} triples ({removed_count/initial_count*100:.2f}%)")
+    logger.info(f"Input subgraph:          {initial_count:,} triples")
+    logger.info(f"Fixed test set:          {len(test_triples):,} triples")
+    logger.info(f"Exact test triples removed: {removed_count:,} triples")
+    logger.info(f"Test pair edges removed: {pair_removed_count:,} triples (any predicate)")
+    logger.info(f"Total removed:           {removed_count + pair_removed_count:,} triples ({(removed_count + pair_removed_count)/initial_count*100:.2f}%)")
     logger.info(f"Output train_candidates: {len(train_candidates):,} triples ({len(train_candidates)/initial_count*100:.2f}%)")
     logger.info("=" * 80)
 
