@@ -455,7 +455,7 @@ Examples:
     parser.add_argument('csv_file', help='Path to TracIn CSV file')
     parser.add_argument('--output-dir', '-o', default=None,
                         help='Output directory (default: same directory as input CSV)')
-    parser.add_argument('--hops', '-k', nargs='+', type=int, default=[2, 3, 4],
+    parser.add_argument('--hops', '-k', nargs='+', type=int, default=[2, 3],
                         help='Hop counts to extract (default: 2 3 4)')
     parser.add_argument('--max-edges', '-m', type=int, default=None,
                         help='Maximum number of training edges to load')

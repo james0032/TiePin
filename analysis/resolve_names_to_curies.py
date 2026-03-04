@@ -201,10 +201,10 @@ def resolve_names(input_path: str, output_path: str, batch_size: int = 50):
 
 
 def main():
-    base_path = Path("/Users/jchung/Documents/RENCI/everycure/git/conve_pykeen/data/clean_baseline/EC_MOA_pairs")
+    base_path = Path("/Users/jchung/Documents/RENCI/everycure/git/conve_pykeen/data/ec_moa_pairs")
 
-    input_path = base_path / "ec_moa_pairs_names.csv"
-    output_path = base_path / "ec_moa_pairs_with_curies.csv"
+    input_path = base_path / "20260216_Active_Pairs_MOA_for_James.csv"
+    output_path = base_path / "20260216_Active_Pairs_MOA_for_James_with_curie.csv"
 
     resolve_names(str(input_path), str(output_path))
 
